@@ -1,5 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import Dict, List, Optional
+import pdb
+import matplotlib.pyplot as plt
 import torch
 import numpy as np
 from detectron2.layers import ShapeSpec, batched_nms
@@ -11,7 +13,6 @@ from detectron2.data import MetadataCatalog
 
 from detectron2.modeling.backbone import Backbone, BACKBONE_REGISTRY
 from detectron2.modeling.proposal_generator import build_proposal_generator
-from detectron2.utils.logger import _log_api_usage
 from detectron2.modeling.meta_arch import (
     META_ARCH_REGISTRY, GeneralizedRCNN
 )
@@ -28,6 +29,7 @@ class RCNN3D(GeneralizedRCNN):
     @classmethod
     def from_config(cls, cfg, priors=None):
         backbone = build_backbone(cfg, priors=priors)
+        
         return {
             "backbone": backbone,
             "proposal_generator": build_proposal_generator(cfg, backbone.output_shape()),
@@ -37,9 +39,8 @@ class RCNN3D(GeneralizedRCNN):
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
         }
-
+    
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
-        
         if not self.training:
             return self.inference(batched_inputs)
 
@@ -48,7 +49,7 @@ class RCNN3D(GeneralizedRCNN):
         # scaling factor for the sample relative to its original scale
         # e.g., how much has the image been upsampled by? or downsampled?
         im_scales_ratio = [info['height'] / im.shape[1] for (info, im) in zip(batched_inputs, images)]
-
+        
         # The unmodified intrinsics for the image
         Ks = [torch.FloatTensor(info['K']) for info in batched_inputs]
 
@@ -83,9 +84,9 @@ class RCNN3D(GeneralizedRCNN):
         do_postprocess: bool = True,
     ):
         assert not self.training
-
+        
         images = self.preprocess_image(batched_inputs)
-
+        
         # scaling factor for the sample relative to its original scale
         # e.g., how much has the image been upsampled by? or downsampled?
         im_scales_ratio = [info['height'] / im.shape[1] for (info, im) in zip(batched_inputs, images)]
@@ -104,7 +105,12 @@ class RCNN3D(GeneralizedRCNN):
         else:
             proposals, _ = self.proposal_generator(images, features, None)
             results, _ = self.roi_heads(images, features, proposals, Ks, im_scales_ratio, None)
-            
+        
+        # For debug
+        '''for idx in range(len(results)):
+            for del_key in ['pred_bbox3D', 'pred_center_cam', 'pred_center_2D', 'pred_dimensions', 'pred_pose']:
+                results[idx].remove(del_key)'''
+        
         if do_postprocess:
             assert not torch.jit.is_scripting(), "Scripting is not supported for postprocess."
             return GeneralizedRCNN._postprocess(results, batched_inputs, images.image_sizes)
@@ -243,18 +249,6 @@ class RCNN3D(GeneralizedRCNN):
             storage.put_image("Left: GT 3D cuboids; Right: Predicted 3D cuboids", vis_img_3d)
 
             break  # only visualize one image in a batch
-
-def build_model(cfg, priors=None):
-    """
-    Build the whole model architecture, defined by ``cfg.MODEL.META_ARCHITECTURE``.
-    Note that it does not load any weights from ``cfg``.
-    """
-    meta_arch = cfg.MODEL.META_ARCHITECTURE
-    model = META_ARCH_REGISTRY.get(meta_arch)(cfg, priors=priors)
-    model.to(torch.device(cfg.MODEL.DEVICE))
-    _log_api_usage("modeling.meta_arch." + meta_arch)
-    return model
-
 
 def build_backbone(cfg, input_shape=None, priors=None):
     """

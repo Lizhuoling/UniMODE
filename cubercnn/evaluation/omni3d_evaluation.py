@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import copy
+import pdb
 import datetime
 import io
 import itertools
@@ -461,6 +462,7 @@ def inference_on_dataset(model, data_loader):
 
             start_compute_time = time.perf_counter()
             outputs = model(inputs)
+            
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             total_compute_time += time.perf_counter() - start_compute_time
@@ -479,7 +481,7 @@ def inference_on_dataset(model, data_loader):
                 # convert to json format
                 instances = output["instances"].to('cpu')
                 prediction["instances"] = instances_to_coco_json(instances, input["image_id"])
-
+                
                 # store in overall predictions
                 inference_json.append(prediction)
 

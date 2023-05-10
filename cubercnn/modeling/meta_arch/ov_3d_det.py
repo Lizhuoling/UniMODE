@@ -1,0 +1,363 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates
+from typing import Dict, List, Optional
+import pdb
+import numpy as np
+import cv2
+import copy
+import re
+from collections import defaultdict
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from detectron2.modeling.meta_arch import META_ARCH_REGISTRY
+from detectron2.config import CfgNode as CN
+from detectron2.structures import ImageList, Instances, Boxes
+from detectron2.data import MetadataCatalog
+
+from maskrcnn_benchmark.modeling.detector import build_detection_model
+from maskrcnn_benchmark.data.datasets.tsv import load_from_yaml_file
+import maskrcnn_benchmark.structures.image_list as maskrcnn_ImageList
+from maskrcnn_benchmark.utils.checkpoint import DetectronCheckpointer
+
+from cubercnn.modeling.detector3d.build import build_3d_detector
+
+@META_ARCH_REGISTRY.register()
+class OV_3D_Det(nn.Module):
+    def __init__(self, cfg, priors=None):
+        super().__init__()
+        self.cfg = cfg
+        self.img_mean = torch.Tensor(self.cfg.MODEL.PIXEL_MEAN)[:, None, None]
+        self.img_std = torch.Tensor(self.cfg.MODEL.PIXEL_STD)[:, None, None]
+
+        self.total_thing_classes = MetadataCatalog.get('omni3d_model').thing_classes
+        self.care_thing_classes = self.cfg.DATASETS.CATEGORY_NAMES
+        self.local2global_cls_map = dict()
+        for src_idx, care_cls in enumerate(self.care_thing_classes):
+            tgt_idx = self.total_thing_classes.index(care_cls)
+            self.local2global_cls_map[src_idx] = tgt_idx
+        
+        ### Build the GLIP model ###
+        self.glip_cfg = copy.deepcopy(cfg.MODEL.GLIP_MODEL)
+        self.glip_cfg.freeze()
+        
+        if self.glip_cfg.USE_GLIP:
+            self.glip_model = build_detection_model(self.glip_cfg)
+
+            if self.glip_cfg.GLIP_WEIGHT != "":
+                checkpointer = DetectronCheckpointer(cfg, self.glip_model, save_dir="")
+                _ = checkpointer.load(self.glip_cfg.GLIP_WEIGHT)
+        
+        # Prepare the content for GLIP detection.
+        class_name_list = self.cfg.DATASETS.CATEGORY_NAMES
+        categories = {i:class_name for i, class_name in enumerate(class_name_list)}
+        self.all_queries, self.all_positive_map_label_to_token = create_queries_and_maps_from_dataset(categories, self.glip_cfg)
+        assert len(self.all_queries) == 1
+
+        self.forward_once_flag = False
+
+        ### Build the 3D Det model ###
+        self.detector = build_3d_detector(cfg)
+
+        #self.max_range = [9999, -9999, 9999, -9999, 9999, -9999]
+
+    def forward_once(self):
+        if not self.forward_once_flag:
+            with torch.no_grad():
+                tokenized = self.glip_model.tokenizer.batch_encode_plus(self.all_queries, 
+                                                            max_length=self.glip_cfg.MODEL.LANGUAGE_BACKBONE.MAX_QUERY_LEN,
+                                                            padding='max_length' if self.glip_cfg.MODEL.LANGUAGE_BACKBONE.PAD_MAX else "longest",
+                                                            return_special_tokens_mask=True,
+                                                            return_tensors='pt',
+                                                            truncation=True).to('cuda')
+                tokenizer_input = {"input_ids": tokenized.input_ids, "attention_mask": tokenized.attention_mask}
+                language_dict_features = self.glip_model.language_backbone(tokenizer_input)
+                self.class_name_emb = language_dict_features['embedded'][language_dict_features['masks'].bool()]
+            self.forward_once_flag = True
+
+    def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
+        self.forward_once()
+        glip_outs = []
+
+        images = self.preprocess_image(batched_inputs)
+        # OV 2D Det
+        if self.glip_cfg.NO_GRADIENT:
+            no_gradient_wrapper = torch.no_grad
+        else:
+            no_gradient_wrapper = pseudo_with
+
+        with no_gradient_wrapper():
+            query_time = len(self.all_queries)
+            for query_i in range(query_time):
+                captions = [self.all_queries[query_i] for ii in range(len(batched_inputs))]
+                positive_map_label_to_token = self.all_positive_map_label_to_token[query_i]
+                
+                if self.glip_model.training:
+                    self.glip_model.eval()
+                glip_out = self.glip_model(images.tensor, captions=captions, positive_map=positive_map_label_to_token)
+                glip_out = glip_out[0] 
+                glip_out.extra_fields['cls_emb'] = self.extract_cls_emb(glip_out.extra_fields['labels'], positive_map_label_to_token)
+                #vis_2d_det(boxlist = glip_out, img = batched_inputs[0]['image'].permute(1, 2, 0).numpy(), class_names = self.cfg.DATASETS.CATEGORY_NAMES) 
+
+                glip_outs.append(glip_out)
+        
+        # 3D Det
+        self.detector(images, batched_inputs)
+
+        '''# For survey the data statistics.
+        for batch in batched_inputs:
+            xyz = batch['instances'].gt_boxes3D[:, 6:9] # 9 numbers in gt_boxes3D: projected 2D center, depth, w, h, l, 3D center
+            if xyz[:, 0].min() < self.max_range[0]:
+                self.max_range[0] = xyz[:, 0].min()
+            if xyz[:, 0].max() > self.max_range[1]:
+                self.max_range[1] = xyz[:, 0].max()
+            if xyz[:, 1].min() < self.max_range[2]:
+                self.max_range[2] = xyz[:, 1].min()
+            if xyz[:, 1].max() > self.max_range[3]:
+                self.max_range[3] = xyz[:, 1].max()
+            if xyz[:, 2].min() < self.max_range[4]:
+                self.max_range[4] = xyz[:, 2].min()
+            if xyz[:, 2].max() > self.max_range[5]:
+                self.max_range[5] = xyz[:, 2].max()
+            print('max_range:', self.max_range)'''
+
+        if not self.training:
+            return self.inference(batched_inputs, glip_outs)
+
+    def inference(self, batched_inputs, glip_outs, conf_thre = 0.5):
+        outputs = []
+        cls_num = len(self.cfg.DATASETS.CATEGORY_NAMES)
+
+        for b_idx in range(len(batched_inputs)):
+            instance = Instances(image_size = (batched_inputs[b_idx]['height'], batched_inputs[b_idx]['width']))
+            # 2D det box
+            pred_classes = glip_outs[b_idx].extra_fields['labels']
+            pred_scores = glip_outs[b_idx].extra_fields['scores']
+            valid_instance_flag = (pred_classes < cls_num) & (pred_scores > conf_thre)
+            pred_classes = pred_classes[valid_instance_flag]
+            
+            for cnt in range(pred_classes.shape[0]):
+                pred_classes[cnt] = self.local2global_cls_map[pred_classes[cnt].item()]
+            
+            instance.set(name = "pred_classes", value = pred_classes)
+
+            pred_boxes = Boxes(glip_outs[b_idx].bbox[valid_instance_flag])
+            instance.set(name = "pred_boxes", value = pred_boxes)
+
+            pred_scores = pred_scores[valid_instance_flag]
+            instance.set(name = "scores", value = pred_scores)
+            
+            '''instance.set(name = "scores_full", value = [])
+            instance.set(name = "pred_bbox3D", value = [])
+            instance.set(name = "pred_center_cam", value = [])
+            instance.set(name = "pred_center_2D", value = [])
+            instance.set(name = "pred_dimensions", value = [])
+            instance.set(name = "'pred_pose", value = [])'''
+
+            outputs.append(dict(instances = instance))
+
+        return outputs
+
+    def extract_cls_emb(self, cls_idxs, positive_map_label_to_token):
+        cls_emb_list = []
+        for cls_idx in cls_idxs:
+            if cls_idx.item() >= len(positive_map_label_to_token):
+                cls_emb_list.append(torch.zeros_like(self.class_name_emb[0]))
+            else:
+                cls_token_idx = positive_map_label_to_token[cls_idx.item()]
+                cls_emb = self.class_name_emb[cls_token_idx].mean(dim = 0)
+                cls_emb_list.append(cls_emb)
+        cls_embs = torch.stack(cls_emb_list, axis = 0)
+        return cls_embs
+
+    def preprocess_image(self, batched_inputs: List[Dict[str, torch.Tensor]]):
+        """
+        Normalize, pad and batch the input images.
+        """
+        images = [x["image"].cuda() for x in batched_inputs]
+        images = [(x - self.img_mean.to(x.device)) / self.img_std.to(x.device) for x in images]
+
+        images = ImageList.from_tensors(images)
+        return images
+        
+
+def pseudo_with():
+    pass
+
+def vis_2d_det(boxlist, img, class_names, conf_thre = 0.5):
+    img = np.ascontiguousarray(img)
+    box_locs = boxlist.bbox.cpu().numpy().astype(np.int32)
+    box_labels = boxlist.extra_fields['labels'].cpu().numpy()
+    box_confs = boxlist.extra_fields['scores'].cpu().numpy()
+
+    valid_mask = (box_confs > conf_thre) & (box_labels < len(class_names))
+    box_locs = box_locs[valid_mask]
+    box_labels = box_labels[valid_mask]
+    box_confs = box_confs[valid_mask]
+
+    for cnt, box_loc in  enumerate(box_locs):
+        box_label = box_labels[cnt]
+        class_name = class_names[box_label]
+        img = cv2.rectangle(img, box_loc[0:2], box_loc[2:4], (0, 255, 0))
+        img = cv2.putText(img, "{:s}: {:.2f}".format(class_name, box_confs[cnt]), box_loc[0:2], cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 255, 0))
+    cv2.imwrite('vis.png', img)
+    pdb.set_trace()
+
+
+def create_queries_and_maps_from_dataset(categories, cfg):
+    
+    labels = []
+    label_list = []
+    keys = list(categories.keys())
+    keys.sort()
+    for i in keys:
+        labels.append(i)
+        label_list.append(categories[i])
+
+    if cfg.TEST.CHUNKED_EVALUATION != -1:
+        labels = chunks(labels, cfg.TEST.CHUNKED_EVALUATION)
+        label_list = chunks(label_list, cfg.TEST.CHUNKED_EVALUATION)
+    else:
+        labels = [labels]
+        label_list = [label_list]
+    
+    all_queries = []
+    all_positive_map_label_to_token = []
+
+    for i in range(len(labels)):
+        labels_i = labels[i]
+        label_list_i = label_list[i]
+        query_i, positive_map_label_to_token_i = create_queries_and_maps(
+            labels_i, label_list_i, additional_labels = None, cfg = cfg)
+        
+        all_queries.append(query_i)
+        all_positive_map_label_to_token.append(positive_map_label_to_token_i)
+    print("All queries", all_queries)
+    return all_queries, all_positive_map_label_to_token
+
+def chunks(lst, n):
+    """Yield successive n-sized chunks from lst."""
+    all_ = []
+    for i in range(0, len(lst), n):
+        data_index = lst[i:i + n]
+        all_.append(data_index)
+    counter = 0
+    for i in all_:
+        counter += len(i)
+    assert(counter == len(lst))
+
+    return all_
+
+def create_queries_and_maps(labels, label_list, additional_labels = None, cfg = None):
+
+    # Clean label list
+    original_label_list = label_list.copy()
+    label_list = [clean_name(i) for i in label_list]
+    # Form the query and get the mapping
+    tokens_positive = []
+    start_i = 0
+    end_i = 0
+    objects_query = ""
+
+    # sep between tokens, follow training
+    separation_tokens = ". "
+    use_caption_prompt = False
+    caption_prompt = None
+    
+    for _index, label in enumerate(label_list):
+        if use_caption_prompt:
+            objects_query += caption_prompt[_index]["prefix"]
+        
+        start_i = len(objects_query)
+
+        if use_caption_prompt:
+            objects_query += caption_prompt[_index]["name"]
+        else:
+            objects_query += label
+        
+        end_i = len(objects_query)
+        tokens_positive.append([(start_i, end_i)])  # Every label has a [(start, end)]
+        
+        if use_caption_prompt:
+            objects_query += caption_prompt[_index]["suffix"]
+
+        if _index != len(label_list) - 1:
+            objects_query += separation_tokens
+    
+    if additional_labels is not None:
+        objects_query += separation_tokens
+        for _index, label in enumerate(additional_labels):
+            objects_query += label
+            if _index != len(additional_labels) - 1:
+                objects_query += separation_tokens
+
+    print(objects_query)
+
+    from transformers import AutoTokenizer
+    # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    if cfg.MODEL.LANGUAGE_BACKBONE.TOKENIZER_TYPE == "bert-base-uncased":
+        bert_name = "/home/twilight/twilight/data/HuggingFace/bert-base-uncased"
+        tokenizer = AutoTokenizer.from_pretrained(bert_name)
+        tokenized = tokenizer(objects_query, return_tensors="pt")
+    elif cfg.MODEL.LANGUAGE_BACKBONE.TOKENIZER_TYPE == "clip":
+        from transformers import CLIPTokenizerFast
+        if cfg.MODEL.DYHEAD.FUSE_CONFIG.MLM_LOSS:
+            tokenizer = CLIPTokenizerFast.from_pretrained("openai/clip-vit-base-patch32",
+                                                                        from_slow=True, mask_token='ðŁĴĳ</w>')
+        else:
+            tokenizer = CLIPTokenizerFast.from_pretrained("openai/clip-vit-base-patch32",
+                                                                        from_slow=True)
+        tokenized = tokenizer(objects_query,
+                              max_length=cfg.MODEL.LANGUAGE_BACKBONE.MAX_QUERY_LEN,
+                              truncation=True,
+                              return_tensors="pt")
+    else:
+        tokenizer = None
+        raise NotImplementedError
+
+    # Create the mapping between tokenized sentence and the original label
+    positive_map_token_to_label, positive_map_label_to_token = create_positive_dict(tokenized, tokens_positive,
+                                                                                        labels=labels)  # from token position to original label
+    return objects_query, positive_map_label_to_token
+
+def create_positive_dict(tokenized, tokens_positive, labels):
+    """construct a dictionary such that positive_map[i] = j, iff token i is mapped to j label"""
+    positive_map = defaultdict(int)
+
+    # Additionally, have positive_map_label_to_tokens
+    positive_map_label_to_token = defaultdict(list)
+
+    for j, tok_list in enumerate(tokens_positive):
+        for (beg, end) in tok_list:
+            beg_pos = tokenized.char_to_token(beg)
+            end_pos = tokenized.char_to_token(end - 1)
+            if beg_pos is None:
+                try:
+                    beg_pos = tokenized.char_to_token(beg + 1)
+                    if beg_pos is None:
+                        beg_pos = tokenized.char_to_token(beg + 2)
+                except:
+                    beg_pos = None
+            if end_pos is None:
+                try:
+                    end_pos = tokenized.char_to_token(end - 2)
+                    if end_pos is None:
+                        end_pos = tokenized.char_to_token(end - 3)
+                except:
+                    end_pos = None
+            if beg_pos is None or end_pos is None:
+                continue
+
+            assert beg_pos is not None and end_pos is not None
+            for i in range(beg_pos, end_pos + 1):
+                positive_map[i] = labels[j]  # because the labels starts from 1
+                positive_map_label_to_token[labels[j]].append(i)
+            # positive_map[j, beg_pos : end_pos + 1].fill_(1)
+    return positive_map, positive_map_label_to_token  # / (positive_map.sum(-1)[:, None] + 1e-6)
+
+def clean_name(name):
+    name = re.sub(r"\(.*\)", "", name)
+    name = re.sub(r"_", " ", name)
+    name = re.sub(r"  ", " ", name)
+    return name

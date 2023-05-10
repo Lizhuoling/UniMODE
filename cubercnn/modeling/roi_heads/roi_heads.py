@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import numpy as np
+import pdb
 import cv2
 from typing import Dict, List, Tuple
 import torch
@@ -32,6 +33,7 @@ def build_roi_heads(cfg, input_shape, priors=None):
     """
     Build ROIHeads defined by `cfg.MODEL.ROI_HEADS.NAME`.
     """
+    
     name = cfg.MODEL.ROI_HEADS.NAME
     return ROI_HEADS_REGISTRY.get(name)(cfg, input_shape, priors=priors)
 

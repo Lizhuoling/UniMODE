@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from detectron2.utils.file_io import PathHandler, PathManager
+import pdb
 
 __all__ = ["CubeRCNNHandler"]
 
@@ -16,6 +17,7 @@ class CubeRCNNHandler(PathHandler):
 
     def _get_local_path(self, path):
         name = path[len(self.PREFIX) :]
+        #pdb.set_trace()
         return PathManager.get_local_path(self.CUBERCNN_PREFIX + name)
 
     def _open(self, path, mode="r", **kwargs):

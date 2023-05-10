@@ -2,6 +2,7 @@
 import logging
 import os
 import sys
+import pdb
 import numpy as np
 import copy
 from collections import OrderedDict
@@ -50,7 +51,7 @@ from cubercnn.modeling.backbone import build_dla_from_vision_fpn_backbone
 from cubercnn import util, vis, data
 import cubercnn.vis.logperf as utils_logperf
 
-MAX_TRAINING_ATTEMPTS = 10
+MAX_TRAINING_ATTEMPTS = 1
 
 
 def do_test(cfg, model, iteration='final', storage=None):
@@ -64,7 +65,7 @@ def do_test(cfg, model, iteration='final', storage=None):
     dataset_names_test = cfg.DATASETS.TEST
     only_2d = cfg.MODEL.ROI_CUBE_HEAD.LOSS_W_3D == 0.0
     output_folder = os.path.join(cfg.OUTPUT_DIR, "inference", 'iter_{}'.format(iteration))
-
+    
     eval_helper = Omni3DEvaluationHelper(
         dataset_names_test, 
         filter_settings, 
@@ -85,7 +86,7 @@ def do_test(cfg, model, iteration='final', storage=None):
         '''
         data_loader = build_detection_test_loader(cfg, dataset_name)
         results_json = inference_on_dataset(model, data_loader)
-
+        
         if comm.is_main_process():
             
             '''
@@ -325,7 +326,7 @@ def setup(args):
     config_file = args.config_file
     
     # store locally if needed
-    if config_file.startswith(util.CubeRCNNHandler.PREFIX):    
+    if config_file.startswith(util.CubeRCNNHandler.PREFIX):   
         config_file = util.CubeRCNNHandler._get_local_path(util.CubeRCNNHandler, config_file)
 
     cfg.merge_from_file(config_file)
@@ -354,7 +355,7 @@ def main(args):
     cfg = setup(args)
 
     logger.info('Preprocessing Training Datasets')
-
+    
     filter_settings = data.get_filter_settings_from_cfg(cfg)
 
     priors = None
@@ -365,7 +366,7 @@ def main(args):
         # store locally if needed
         if category_path.startswith(util.CubeRCNNHandler.PREFIX):
             category_path = util.CubeRCNNHandler._get_local_path(util.CubeRCNNHandler, category_path)
-
+        
         metadata = util.load_json(category_path)
 
         # register the categories
@@ -373,7 +374,7 @@ def main(args):
         id_map = {int(key):val for key, val in metadata['thing_dataset_id_to_contiguous_id'].items()}
         MetadataCatalog.get('omni3d_model').thing_classes = thing_classes
         MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id  = id_map
-
+        
     else: 
 
         # setup and join the data.
@@ -432,12 +433,12 @@ def main(args):
     while remaining_attempts > 0:
 
         # build the training model.
-        model = build_model(cfg, priors=priors)
-
+        model = build_model(cfg, priors=priors).cuda()
+        
         if remaining_attempts == MAX_TRAINING_ATTEMPTS:
             # log the first attempt's settings.
             logger.info("Model:\n{}".format(model))
-
+        
         if args.eval_only:
             # skip straight to eval mode
             DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
@@ -457,7 +458,6 @@ def main(args):
         if do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=args.resume):
             break
         else:
-
             # allow restart when a model fails to train.
             remaining_attempts -= 1
             del model

@@ -1,0 +1,458 @@
+CUDNN_BENCHMARK: false
+DATALOADER:
+  ASPECT_RATIO_GROUPING: true
+  BALANCE_DATASETS: false
+  FILTER_EMPTY_ANNOTATIONS: true
+  NUM_WORKERS: 4
+  REPEAT_THRESHOLD: 0.1
+  SAMPLER_TRAIN: RepeatFactorTrainingSampler
+DATASETS:
+  CATEGORY_NAMES:
+  - chair
+  - table
+  - cabinet
+  - car
+  - lamp
+  - books
+  - sofa
+  - pedestrian
+  - picture
+  - window
+  - pillow
+  - truck
+  - door
+  - blinds
+  - sink
+  - shelves
+  - television
+  - shoes
+  - cup
+  - bottle
+  - bookcase
+  - laptop
+  - desk
+  - cereal box
+  - floor mat
+  - traffic cone
+  - mirror
+  - barrier
+  - counter
+  - camera
+  - bicycle
+  - toilet
+  - bus
+  - bed
+  - refrigerator
+  - trailer
+  - box
+  - oven
+  - clothes
+  - van
+  - towel
+  - motorcycle
+  - night stand
+  - stove
+  - machine
+  - stationery
+  - bathtub
+  - cyclist
+  - curtain
+  - bin
+  IGNORE_NAMES:
+  - dontcare
+  - ignore
+  - void
+  MAX_DEPTH: 100000000.0
+  MIN_HEIGHT_THRES: 0.05
+  MODAL_2D_BOXES: false
+  PRECOMPUTED_PROPOSAL_TOPK_TEST: 1000
+  PRECOMPUTED_PROPOSAL_TOPK_TRAIN: 2000
+  PROPOSAL_FILES_TEST: []
+  PROPOSAL_FILES_TRAIN: []
+  TEST:
+  - SUNRGBD_test
+  - Hypersim_test
+  - ARKitScenes_test
+  - Objectron_test
+  - KITTI_test
+  - nuScenes_test
+  TRAIN:
+  - SUNRGBD_train
+  - SUNRGBD_val
+  - Hypersim_train
+  - Hypersim_val
+  - ARKitScenes_train
+  - ARKitScenes_val
+  - Objectron_train
+  - Objectron_val
+  - nuScenes_train
+  - nuScenes_val
+  - KITTI_train
+  - KITTI_val
+  TRUNCATION_THRES: 0.75
+  TRUNC_2D_BOXES: true
+  VISIBILITY_THRES: 0.25
+GLOBAL:
+  HACK: 1.0
+INPUT:
+  CROP:
+    ENABLED: false
+    SIZE:
+    - 0.9
+    - 0.9
+    TYPE: relative_range
+  FORMAT: BGR
+  MASK_FORMAT: polygon
+  MAX_SIZE_TEST: 4096
+  MAX_SIZE_TRAIN: 4096
+  MIN_SIZE_TEST: 512
+  MIN_SIZE_TRAIN:
+  - 256
+  - 272
+  - 288
+  - 304
+  - 320
+  - 336
+  - 352
+  - 368
+  - 384
+  - 400
+  - 416
+  - 432
+  - 448
+  - 464
+  - 480
+  - 496
+  - 512
+  - 528
+  - 544
+  - 560
+  - 576
+  - 592
+  - 608
+  - 624
+  - 640
+  MIN_SIZE_TRAIN_SAMPLING: choice
+  RANDOM_FLIP: horizontal
+MODEL:
+  ANCHOR_GENERATOR:
+    ANGLES:
+    - - -90
+      - 0
+      - 90
+    ASPECT_RATIOS:
+    - - 0.5
+      - 1.0
+      - 2.0
+    NAME: DefaultAnchorGenerator
+    OFFSET: 0.0
+    SIZES:
+    - - 32
+    - - 64
+    - - 128
+    - - 256
+    - - 512
+  BACKBONE:
+    FREEZE_AT: 0
+    NAME: build_dla_from_vision_fpn_backbone
+  DEVICE: cuda
+  DLA:
+    TRICKS: false
+    TYPE: dla34
+  FPN:
+    FUSE_TYPE: sum
+    IN_FEATURES:
+    - p2
+    - p3
+    - p4
+    - p5
+    - p6
+    NORM: ''
+    OUT_CHANNELS: 256
+  KEYPOINT_ON: false
+  LOAD_PROPOSALS: false
+  MASK_ON: false
+  META_ARCHITECTURE: RCNN3D
+  PANOPTIC_FPN:
+    COMBINE:
+      ENABLED: true
+      INSTANCES_CONFIDENCE_THRESH: 0.5
+      OVERLAP_THRESH: 0.5
+      STUFF_AREA_LIMIT: 4096
+    INSTANCE_LOSS_WEIGHT: 1.0
+  PIXEL_MEAN:
+  - 103.53
+  - 116.28
+  - 123.675
+  PIXEL_STD:
+  - 57.375
+  - 57.12
+  - 58.395
+  PROPOSAL_GENERATOR:
+    MIN_SIZE: 0
+    NAME: RPNWithIgnore
+  RESNETS:
+    DEFORM_MODULATED: false
+    DEFORM_NUM_GROUPS: 1
+    DEFORM_ON_PER_STAGE:
+    - false
+    - false
+    - false
+    - false
+    DEPTH: 50
+    NORM: FrozenBN
+    NUM_GROUPS: 1
+    OUT_FEATURES:
+    - res2
+    - res3
+    - res4
+    - res5
+    RES2_OUT_CHANNELS: 256
+    RES5_DILATION: 1
+    STEM_OUT_CHANNELS: 64
+    STRIDE_IN_1X1: true
+    TORCHVISION: true
+    WIDTH_PER_GROUP: 64
+  RETINANET:
+    BBOX_REG_LOSS_TYPE: smooth_l1
+    BBOX_REG_WEIGHTS: &id002
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    FOCAL_LOSS_ALPHA: 0.25
+    FOCAL_LOSS_GAMMA: 2.0
+    IN_FEATURES:
+    - p3
+    - p4
+    - p5
+    - p6
+    - p7
+    IOU_LABELS:
+    - 0
+    - -1
+    - 1
+    IOU_THRESHOLDS:
+    - 0.4
+    - 0.5
+    NMS_THRESH_TEST: 0.5
+    NORM: ''
+    NUM_CLASSES: 80
+    NUM_CONVS: 4
+    PRIOR_PROB: 0.01
+    SCORE_THRESH_TEST: 0.05
+    SMOOTH_L1_LOSS_BETA: 0.1
+    TOPK_CANDIDATES_TEST: 1000
+  ROI_BOX_CASCADE_HEAD:
+    BBOX_REG_WEIGHTS:
+    - &id001
+      - 10.0
+      - 10.0
+      - 5.0
+      - 5.0
+    - - 20.0
+      - 20.0
+      - 10.0
+      - 10.0
+    - - 30.0
+      - 30.0
+      - 15.0
+      - 15.0
+    IOUS:
+    - 0.5
+    - 0.6
+    - 0.7
+  ROI_BOX_HEAD:
+    BBOX_REG_LOSS_TYPE: smooth_l1
+    BBOX_REG_LOSS_WEIGHT: 1.0
+    BBOX_REG_WEIGHTS: *id001
+    CLS_AGNOSTIC_BBOX_REG: false
+    CONV_DIM: 256
+    FC_DIM: 1024
+    NAME: FastRCNNConvFCHead
+    NORM: ''
+    NUM_CONV: 0
+    NUM_FC: 2
+    POOLER_RESOLUTION: 7
+    POOLER_SAMPLING_RATIO: 0
+    POOLER_TYPE: ROIAlignV2
+    SMOOTH_L1_BETA: 0.0
+    TRAIN_ON_PRED_BOXES: false
+  ROI_CUBE_HEAD:
+    ALLOCENTRIC_POSE: true
+    CHAMFER_POSE: true
+    CLUSTER_BINS: 1
+    CONV_DIM: 256
+    DIMS_PRIORS_ENABLED: true
+    DISENTANGLED_LOSS: true
+    FC_DIM: 1024
+    INVERSE_Z_WEIGHT: false
+    LOSS_W_3D: 1.0
+    LOSS_W_DIMS: 1.0
+    LOSS_W_JOINT: 1.0
+    LOSS_W_POSE: 1.0
+    LOSS_W_XY: 1.0
+    LOSS_W_Z: 1.0
+    NAME: CubeHead
+    NUM_CONV: 0
+    NUM_FC: 2
+    POOLER_RESOLUTION: 7
+    POOLER_SAMPLING_RATIO: 0
+    POOLER_TYPE: ROIAlignV2
+    POSE_TYPE: 6d
+    SCALE_ROI_BOXES: 0.0
+    SHARED_FC: true
+    USE_CONFIDENCE: 1.0
+    VIRTUAL_DEPTH: true
+    VIRTUAL_FOCAL: 512.0
+    Z_TYPE: direct
+  ROI_HEADS:
+    BATCH_SIZE_PER_IMAGE: 512
+    IN_FEATURES:
+    - p2
+    - p3
+    - p4
+    - p5
+    - p6
+    IOU_LABELS:
+    - 0
+    - 1
+    IOU_THRESHOLDS:
+    - 0.5
+    NAME: ROIHeads3D
+    NMS_THRESH_TEST: 0.5
+    NUM_CLASSES: 50
+    POSITIVE_FRACTION: 0.25
+    PROPOSAL_APPEND_GT: true
+    SCORE_THRESH_TEST: 0.01
+  ROI_KEYPOINT_HEAD:
+    CONV_DIMS:
+    - 512
+    - 512
+    - 512
+    - 512
+    - 512
+    - 512
+    - 512
+    - 512
+    LOSS_WEIGHT: 1.0
+    MIN_KEYPOINTS_PER_IMAGE: 1
+    NAME: CubeKeypointRCNNHead
+    NORMALIZE_LOSS_BY_VISIBLE_KEYPOINTS: true
+    NUM_KEYPOINTS: 8
+    POOLER_RESOLUTION: 14
+    POOLER_SAMPLING_RATIO: 0
+    POOLER_TYPE: ROIAlignV2
+  ROI_MASK_HEAD:
+    CLS_AGNOSTIC_MASK: false
+    CONV_DIM: 256
+    NAME: MaskRCNNConvUpsampleHead
+    NORM: ''
+    NUM_CONV: 0
+    POOLER_RESOLUTION: 14
+    POOLER_SAMPLING_RATIO: 0
+    POOLER_TYPE: ROIAlignV2
+  RPN:
+    BATCH_SIZE_PER_IMAGE: 256
+    BBOX_REG_LOSS_TYPE: smooth_l1
+    BBOX_REG_LOSS_WEIGHT: 1.0
+    BBOX_REG_WEIGHTS: *id002
+    BOUNDARY_THRESH: -1
+    CONV_DIMS:
+    - -1
+    HEAD_NAME: StandardRPNHead
+    IGNORE_THRESHOLD: 0.5
+    IN_FEATURES:
+    - p2
+    - p3
+    - p4
+    - p5
+    - p6
+    IOU_LABELS:
+    - 0
+    - -1
+    - 1
+    IOU_THRESHOLDS:
+    - 0.05
+    - 0.05
+    LOSS_WEIGHT: 1.0
+    NMS_THRESH: 0.7
+    OBJECTNESS_UNCERTAINTY: IoUness
+    POSITIVE_FRACTION: 1.0
+    POST_NMS_TOPK_TEST: 1000
+    POST_NMS_TOPK_TRAIN: 1000
+    PRE_NMS_TOPK_TEST: 1000
+    PRE_NMS_TOPK_TRAIN: 2000
+    SMOOTH_L1_BETA: 0.0
+  SEM_SEG_HEAD:
+    COMMON_STRIDE: 4
+    CONVS_DIM: 128
+    IGNORE_VALUE: 255
+    IN_FEATURES:
+    - p2
+    - p3
+    - p4
+    - p5
+    LOSS_WEIGHT: 1.0
+    NAME: SemSegFPNHead
+    NORM: GN
+    NUM_CLASSES: 54
+  STABILIZE: 0.02
+  USE_BN: true
+  WEIGHTS: ''
+SEED: -1
+SOLVER:
+  AMP:
+    ENABLED: false
+  BASE_LR: 0.12
+  BIAS_LR_FACTOR: 1.0
+  CHECKPOINT_PERIOD: 2336
+  CLIP_GRADIENTS:
+    CLIP_TYPE: norm
+    CLIP_VALUE: 1.0
+    ENABLED: false
+    NORM_TYPE: 2.0
+  GAMMA: 0.1
+  IMS_PER_BATCH: 192
+  LR_SCHEDULER_NAME: WarmupMultiStepLR
+  MAX_ITER: 116801
+  MOMENTUM: 0.9
+  NESTEROV: false
+  REFERENCE_WORLD_SIZE: 0
+  STEPS:
+  - 70080
+  - 93440
+  - 1168000
+  TYPE: sgd
+  WARMUP_FACTOR: 0.001
+  WARMUP_ITERS: 3650
+  WARMUP_METHOD: linear
+  WEIGHT_DECAY: 0.0001
+  WEIGHT_DECAY_BIAS: 0.0001
+  WEIGHT_DECAY_NORM: 0.0
+TEST:
+  AUG:
+    ENABLED: false
+    FLIP: true
+    MAX_SIZE: 4000
+    MIN_SIZES:
+    - 400
+    - 500
+    - 600
+    - 700
+    - 800
+    - 900
+    - 1000
+    - 1100
+    - 1200
+  DETECTIONS_PER_IMAGE: 100
+  EVAL_PERIOD: 29200
+  EXPECTED_RESULTS: []
+  KEYPOINT_OKS_SIGMAS: []
+  PRECISE_BN:
+    ENABLED: false
+    NUM_ITER: 200
+  TRUNCATION_THRES: 0.33333333
+  VISIBILITY_THRES: 0.33333333
+VERSION: 2
+VIS_PERIOD: 2336

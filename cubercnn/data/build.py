@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import itertools
+import pdb
 import logging
 import numpy as np
 import math
@@ -217,7 +218,7 @@ def build_detection_test_loader(dataset, *, mapper, sampler=None, num_workers=0)
         dataset = MapDataset(dataset, mapper)
     if sampler is None:
         sampler = InferenceSampler(len(dataset))
-
+    
     # Always use 1 image per worker during inference since this is the
     # standard when reporting inference time in papers.
     batch_sampler = torch.utils.data.sampler.BatchSampler(sampler, 1, drop_last=False)
