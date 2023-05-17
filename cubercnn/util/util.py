@@ -301,3 +301,20 @@ def get_color(ind=None, hex=False):
 
 def string_similarity(text1, text2):
     return SequenceMatcher(None, text1, text2).ratio()
+
+class Converter_key2channel():
+     def __init__(self, keys, channels):
+         super(Converter_key2channel, self).__init__()
+         
+         # flatten keys and channels
+         self.keys = [key for key in keys]
+         self.channels = [channel for channel in channels]
+
+     def __call__(self, key):
+        # find the corresponding index
+        index = self.keys.index(key)
+
+        s = sum(self.channels[:index])
+        e = s + self.channels[index]
+
+        return slice(s, e, 1)

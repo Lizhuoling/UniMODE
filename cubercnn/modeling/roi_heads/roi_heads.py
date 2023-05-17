@@ -178,7 +178,7 @@ class ROIHeads3D(StandardROIHeads):
         )
 
         cube_head = build_cube_head(cfg, shape)
-
+        
         return {
             'cube_head': cube_head,
             'cube_pooler': cube_pooler,
@@ -223,7 +223,7 @@ class ROIHeads3D(StandardROIHeads):
             if self.loss_w_3d > 0:
                 instances_3d, losses_cube = self._forward_cube(features, proposals, Ks, im_dims, im_scales_ratio)
                 losses.update(losses_cube)
-
+            
             return instances_3d, losses
         
         else:
@@ -344,7 +344,7 @@ class ROIHeads3D(StandardROIHeads):
             proposals, _ = select_foreground_proposals(instances, self.num_classes)
             proposal_boxes = [x.proposal_boxes for x in proposals]
             pred_boxes = [x.pred_boxes for x in proposals]
-
+            
             box_classes = (torch.cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0))
             gt_boxes3D = torch.cat([p.gt_boxes3D for p in proposals], dim=0,)
             gt_poses = torch.cat([p.gt_poses for p in proposals], dim=0,)
@@ -485,11 +485,11 @@ class ROIHeads3D(StandardROIHeads):
             cube_dims = torch.exp(cube_dims_norm.clip(max=5))
         
         if self.allocentric_pose:
-            
+
             # To compare with GTs, we need the pose to be egocentric, not allocentric
             cube_pose_allocentric = cube_pose
             cube_pose = util.R_from_allocentric(Ks_scaled_per_box, cube_pose, u=cube_x.detach(), v=cube_y.detach())
-            
+        pdb.set_trace()
         cube_z = cube_z.squeeze()
         
         if self.z_type =='sigmoid':    

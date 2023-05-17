@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from detectron2.utils.registry import Registry
+import pdb
 from typing import Dict
 from detectron2.layers import ShapeSpec
 from torch import nn
@@ -183,7 +184,7 @@ class CubeHead(nn.Module):
 
         elif self.pose_type == 'euler':
             box_pose = euler_angles_to_matrix(box_pose.view(-1, 3), 'XYZ')
-
+        
         box_2d_deltas = box_2d_deltas.view(n, self.num_classes, 2)
         box_dims = box_dims.view(n, self.num_classes, 3)
         box_pose = box_pose.view(n, self.num_classes, 3, 3)

@@ -199,7 +199,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
             diverging_model = cfg.MODEL.STABILIZE > 0 and \
                         (losses_reduced > recent_loss*TOLERANCE or \
                             not (np.isfinite(losses_reduced)) or np.isnan(losses_reduced))
-
+            
             if diverging_model:
                 # clip and warn the user.
                 losses = losses.clip(0, 1) 

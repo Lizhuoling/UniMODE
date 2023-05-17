@@ -23,6 +23,8 @@ from detectron2.solver import build_lr_scheduler
 from detectron2.utils.events import EventStorage
 from detectron2.utils.logger import setup_logger
 
+#torch.autograd.set_detect_anomaly(True)
+os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
 logger = logging.getLogger("cubercnn")
 
 sys.dont_write_bytecode = True
@@ -217,6 +219,8 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
             # backward and step
             optimizer.zero_grad()
             losses.backward()
+            #with torch.autograd.detect_anomaly():
+            #    losses.backward()
 
             # if the loss is not too high, 
             # we still want to check gradients.
@@ -230,6 +234,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
                             diverging_model = torch.isnan(param.grad).any() or torch.isinf(param.grad).any()
                         
                         if diverging_model:
+                            pdb.set_trace()
                             logger.warning('Skipping gradient update due to inf/nan detection, loss is {}'.format(loss_dict_reduced))
                             break
 
@@ -453,6 +458,7 @@ def main(args):
                 model, device_ids=[comm.get_local_rank()], 
                 broadcast_buffers=False, find_unused_parameters=True
             )
+            model._set_static_graph()
 
         # train full model, potentially with resume.
         if do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=args.resume):
