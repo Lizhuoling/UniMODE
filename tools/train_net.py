@@ -333,7 +333,7 @@ def setup(args):
     # store locally if needed
     if config_file.startswith(util.CubeRCNNHandler.PREFIX):   
         config_file = util.CubeRCNNHandler._get_local_path(util.CubeRCNNHandler, config_file)
-
+    
     cfg.merge_from_file(config_file)
     cfg.merge_from_list(args.opts)
     cfg.freeze()

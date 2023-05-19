@@ -489,7 +489,7 @@ class ROIHeads3D(StandardROIHeads):
             # To compare with GTs, we need the pose to be egocentric, not allocentric
             cube_pose_allocentric = cube_pose
             cube_pose = util.R_from_allocentric(Ks_scaled_per_box, cube_pose, u=cube_x.detach(), v=cube_y.detach())
-        pdb.set_trace()
+        
         cube_z = cube_z.squeeze()
         
         if self.z_type =='sigmoid':    

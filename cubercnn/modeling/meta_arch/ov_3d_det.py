@@ -92,8 +92,12 @@ class OV_3D_Det(nn.Module):
             box_num = glip_out.bbox.shape[0]
             if box_num == desired_box_num:
                 continue
+            # Note: For unknown reason, the output box number by GLIP can be bigger than DETECTIONS_PER_IMG (such as 101 vs 100). I speculate this may be a bug in GLIP.
             elif box_num > desired_box_num:
-                raise Exception("The GLIP output box number should not be bigger than the desired number. Some bug exists.")
+                glip_out.bbox = glip_out.bbox[:desired_box_num]
+                glip_out.extra_fields['scores'] = glip_out.extra_fields['scores'][:desired_box_num]
+                glip_out.extra_fields['labels'] = glip_out.extra_fields['labels'][:desired_box_num]
+                glip_out.extra_fields['cls_emb'] = glip_out.extra_fields['cls_emb'][:desired_box_num]
             else:
                 pad_num = desired_box_num - box_num 
                 glip_out.bbox = torch.cat((glip_out.bbox, glip_out.bbox.new_zeros(pad_num, 4)), dim = 0)
@@ -106,32 +110,35 @@ class OV_3D_Det(nn.Module):
         self.forward_once()
 
         images = self.preprocess_image(batched_inputs)
-        batched_inputs = self.remove_irrelevant_gts(batched_inputs)
+        if self.training:
+            batched_inputs = self.remove_irrelevant_gts(batched_inputs)
         # OV 2D Det
         if self.glip_cfg.NO_GRADIENT:
             no_gradient_wrapper = torch.no_grad
         else:
             no_gradient_wrapper = pseudo_with
 
-        with no_gradient_wrapper():
-            query_i = 0   # Only support one query sentence.
+        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
+            with no_gradient_wrapper():
+                query_i = 0   # Only support one query sentence.
 
-            captions = [self.all_queries[query_i] for ii in range(len(batched_inputs))]
-            positive_map_label_to_token = self.all_positive_map_label_to_token[query_i]
-                
-            if self.glip_model.training:
-                self.glip_model.eval()
-            glip_outs = self.glip_model(images.tensor, captions=captions, positive_map=positive_map_label_to_token)
-            for glip_out in glip_outs:
-                glip_out.extra_fields['cls_emb'] = self.extract_cls_emb(glip_out.extra_fields['labels'], positive_map_label_to_token)
-                #vis_2d_det(boxlist = glip_out, img = batched_inputs[0]['image'].permute(1, 2, 0).numpy(), class_names = self.cfg.DATASETS.CATEGORY_NAMES) 
-
-        glip_results = dict()
-        glip_outs = self.pad_glip_outs(glip_outs)
-        glip_results['bbox'] = torch.stack([ele.bbox for ele in glip_outs], dim  = 0)   # Left shape: (bs, box_num, 4)
-        glip_results['scores'] = torch.stack([ele.get_field('scores') for ele in glip_outs], dim  = 0)  # Left shape: (bs, box_num)
-        glip_results['labels'] = torch.stack([ele.get_field('labels') for ele in glip_outs], dim  = 0)  # Left shape: (bs, box_num)
-        glip_results['cls_emb'] = torch.stack([ele.get_field('cls_emb') for ele in glip_outs], dim  = 0)  # Left shape: (bs, box_num, cls_emb_len)
+                captions = [self.all_queries[query_i] for ii in range(len(batched_inputs))]
+                positive_map_label_to_token = self.all_positive_map_label_to_token[query_i]
+                    
+                if self.glip_model.training:
+                    self.glip_model.eval()
+                glip_outs = self.glip_model(images.tensor, captions=captions, positive_map=positive_map_label_to_token)
+                for glip_out in glip_outs:
+                    glip_out.extra_fields['cls_emb'] = self.extract_cls_emb(glip_out.extra_fields['labels'], positive_map_label_to_token)
+                    #vis_2d_det(boxlist = glip_out, img = batched_inputs[0]['image'].permute(1, 2, 0).numpy(), class_names = self.cfg.DATASETS.CATEGORY_NAMES) 
+            glip_results = dict()
+            glip_outs = self.pad_glip_outs(glip_outs)
+            glip_results['bbox'] = torch.stack([ele.bbox for ele in glip_outs], dim  = 0)   # Left shape: (bs, box_num, 4)
+            glip_results['scores'] = torch.stack([ele.get_field('scores') for ele in glip_outs], dim  = 0)  # Left shape: (bs, box_num)
+            glip_results['labels'] = torch.stack([ele.get_field('labels') for ele in glip_outs], dim  = 0)  # Left shape: (bs, box_num)
+            glip_results['cls_emb'] = torch.stack([ele.get_field('cls_emb') for ele in glip_outs], dim  = 0)  # Left shape: (bs, box_num, cls_emb_len)
+        else:
+            glip_results = {}
         
         # 3D Det
         detector_out = self.detector(images, batched_inputs, glip_results, self.class_name_emb)
@@ -157,13 +164,16 @@ class OV_3D_Det(nn.Module):
             loss_dict = self.forward_train(detector_out, batched_inputs)
             return loss_dict
         else:
-            return self.forward_inference(batched_inputs, glip_results)
+            return self.forward_inference(detector_out, batched_inputs, glip_results)
         
     def forward_train(self, detector_out, batched_inputs):
         return self.detector.loss(detector_out, batched_inputs)
 
-    def forward_inference(self, batched_inputs, glip_results, conf_thre = 0.01):
+    def forward_inference(self, detector_out, batched_inputs, glip_results, conf_thre = 0.01):
         outputs = []
+
+        self.detector.inference(detector_out, batched_inputs)
+
         cls_num = len(self.cfg.DATASETS.CATEGORY_NAMES)
 
         for b_idx in range(len(batched_inputs)):

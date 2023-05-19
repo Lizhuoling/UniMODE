@@ -45,7 +45,6 @@ MODEL:
 
   GLIP_MODEL:
     USE_GLIP: True
-    GLIP_INITIALIZE_QUERY: True
     NO_GRADIENT: True
     GLIP_WEIGHT: "MODEL/glip_a_tiny_o365.pth"
 

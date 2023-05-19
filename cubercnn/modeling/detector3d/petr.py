@@ -20,6 +20,7 @@ from mmdet.models.utils import build_transformer
 from mmdet.models.utils.transformer import inverse_sigmoid
 from mmcv.cnn.bricks.transformer import build_positional_encoding
 from mmdet.core import build_assigner, build_sampler, multi_apply, reduce_mean
+from mmdet.models import build_loss
 
 from cubercnn.util.grid_mask import GridMask
 from cubercnn.modeling import neck
@@ -88,6 +89,10 @@ class DETECTOR_PETR(nn.Module):
     def loss(self, detector_out, batched_inputs):
         loss_dict = self.petr_head.loss(detector_out, batched_inputs)
         return loss_dict
+    
+    def inference(self, detector_out, batched_inputs):
+        inference_results = self.petr_head.inference(detector_out, batched_inputs)
+        return inference_results
 
     def scale_intrinsics(self, images, batched_inputs):
         height_im_scales_ratios = np.array([im.shape[1] / info['height'] for (info, im) in zip(batched_inputs, images)])
@@ -191,7 +196,10 @@ class PETR_HEAD(nn.Module):
 
         self.total_cls_num = len(cfg.DATASETS.CATEGORY_NAMES)
         self.num_query = cfg.MODEL.DETECTOR3D.PETR.NUM_QUERY
-        self.glip_out_num = cfg.MODEL.GLIP_MODEL.MODEL.ATSS.DETECTIONS_PER_IMG
+        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
+            self.glip_out_num = cfg.MODEL.GLIP_MODEL.MODEL.ATSS.DETECTIONS_PER_IMG
+        else:
+            self.glip_out_num = 0
         self.random_init_query_num = self.num_query - self.glip_out_num
         assert self.random_init_query_num >= 0
 
@@ -200,7 +208,7 @@ class PETR_HEAD(nn.Module):
         self.embed_dims = 256
         self.position_dim = 3 * self.depth_num
         self.position_range = [-50, 50, -2, 4, 0, 100]  # (x_min, x_max, y_min, y_max, z_min, z_max). x: right, y: down, z: inwards
-        self.uncern_range = cfg.MODEL.DETECTOR3D.PETR.UNCERN_RANGE
+        self.uncern_range = cfg.MODEL.DETECTOR3D.PETR.HEAD.UNCERN_RANGE
 
         self.input_proj = Conv2d(self.in_channels, self.embed_dims, kernel_size=1)
         
@@ -213,18 +221,19 @@ class PETR_HEAD(nn.Module):
 
         # Generating query heads
         self.lang_dim = cfg.MODEL.GLIP_MODEL.MODEL.LANGUAGE_BACKBONE.LANG_DIM
-        self.pos_conf_mlp = nn.Sequential(
-                nn.Linear(5, self.embed_dims),
-                nn.ReLU(),
-                nn.Linear(self.embed_dims, self.embed_dims),
-            )
-        self.glip_cls_emb_mlp = nn.Linear(self.lang_dim, self.embed_dims)
-        self.glip_pos_emb_mlp = nn.Sequential(
-                nn.Linear(self.depth_num * 6, self.embed_dims),
-                nn.ReLU(),
-                nn.Linear(self.embed_dims, self.embed_dims),
-            )
-        self.glip_conf_emb = nn.Linear(1, self.embed_dims)
+        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
+            self.pos_conf_mlp = nn.Sequential(
+                    nn.Linear(5, self.embed_dims),
+                    nn.ReLU(),
+                    nn.Linear(self.embed_dims, self.embed_dims),
+                )
+            self.glip_cls_emb_mlp = nn.Linear(self.lang_dim, self.embed_dims)
+            self.glip_pos_emb_mlp = nn.Sequential(
+                    nn.Linear(self.depth_num * 6, self.embed_dims),
+                    nn.ReLU(),
+                    nn.Linear(self.embed_dims, self.embed_dims),
+                )
+            self.glip_conf_emb = nn.Linear(1, self.embed_dims)
         if self.random_init_query_num > 0:
             self.reference_points = nn.Embedding(self.random_init_query_num, 3)
             self.unknown_cls_emb = nn.Embedding(1, self.embed_dims)
@@ -275,9 +284,9 @@ class PETR_HEAD(nn.Module):
         self.bias0 = nn.Parameter(torch.Tensor([bias_value]), requires_grad=True)
 
         # One-to-one macther
-        self.cls_weight = 2.0
-        self.reg_weight = 0.25
-        self.iou_weight = 0.0
+        self.cls_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_WEIGHT
+        self.reg_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.REG_WEIGHT
+        self.iou_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.IOU_WEIGHT
         matcher_cfg = matcher_cfgs(cfg.MODEL.DETECTOR3D.PETR.MATCHER_NAME)
         matcher_cfg.update(dict(total_cls_num = self.total_cls_num, 
                                 cls_weight = self.cls_weight, 
@@ -288,8 +297,11 @@ class PETR_HEAD(nn.Module):
         self.matcher = build_assigner(matcher_cfg)
 
         # Loss functions
-        self.cls_loss = nn.BCEWithLogitsLoss(reduction = 'none')
+        #self.cls_loss = nn.BCEWithLogitsLoss(reduction = 'none')
+        self.cls_loss = build_loss({'type': 'FocalLoss', 'use_sigmoid': True, 'gamma': 2.0, 'alpha': 0.25, 'loss_weight': 1.0})
+        #self.reg_loss = build_loss({'type': 'L1Loss', 'loss_weight': 1.0})
         self.reg_loss = nn.L1Loss(reduction = 'none')
+        self.iou_loss = build_loss({'type': 'GIoULoss', 'loss_weight': 0.0})
         
         self.init_weights()
 
@@ -371,10 +383,13 @@ class PETR_HEAD(nn.Module):
         coords_d = self.produce_coords_d()
         pos_embed, _ = self.position_embeding(feat, coords_d, Ks, masks, pad_img_resolution)  # Left shape: (B, C, feat_h, feat_w)
 
-        glip_bbox_emb = self.box_2d_emb(glip_results['bbox'], Ks, coords_d) # Left shape: (B, num_box, L)
-        glip_cls_emb = self.glip_cls_emb_mlp(glip_results['cls_emb'])  # Left shape: (B, num_box, L)
-        glip_score_emb = self.glip_conf_emb(glip_results['scores'].unsqueeze(-1))   # Left shape: (B, num_box, L) 
-        query_embeds = glip_bbox_emb + glip_cls_emb + glip_score_emb    # Left shape: (B, num_box, L) 
+        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
+            glip_bbox_emb = self.box_2d_emb(glip_results['bbox'], Ks, coords_d) # Left shape: (B, num_box, L)
+            glip_cls_emb = self.glip_cls_emb_mlp(glip_results['cls_emb'])  # Left shape: (B, num_box, L)
+            glip_score_emb = self.glip_conf_emb(glip_results['scores'].unsqueeze(-1))   # Left shape: (B, num_box, L) 
+            query_embeds = glip_bbox_emb + glip_cls_emb + glip_score_emb    # Left shape: (B, num_box, L) 
+        else:
+            query_embeds = feat.new_zeros(B, 0, self.embed_dims)
         if self.random_init_query_num > 0:
             random_reference_points = self.reference_points.weight
             random_query_embeds = self.query_embedding(pos2posemb3d(random_reference_points))
@@ -418,6 +433,42 @@ class PETR_HEAD(nn.Module):
         
         return outs
     
+    def inference(self, detector_out, batched_inputs):
+        cls_scores = detector_out['all_cls_scores'][-1].sigmoid() # Left shape: (B, num_query, cls_num)
+        bbox_preds = detector_out['all_bbox_preds'][-1] # Left shape: (B, num_query, attr_num)
+        B = cls_scores.shape[0]
+
+        max_cls_scores, max_cls_idxs = cls_scores.max(-1) # max_cls_scores shape: (B, num_query), max_cls_idxs shape: (B, num_query)
+        confs_3d_base_2d = torch.clamp(1 - bbox_preds[...,  self.reg_key_manager('uncern')].exp().squeeze(-1) / 10, min = 1e-3, max = 1)   # Left shape: (B, num_query)
+        confs_3d = max_cls_scores * confs_3d_base_2d
+
+        valid_mask = torch.ones_like(max_cls_scores, dtype = torch.bool)
+        if self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.CONFIDENCE_2D_THRE > 0:
+            valid_mask = valid_mask & (max_cls_scores > self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.CONFIDENCE_2D_THRE)
+        if self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.CONFIDENCE_3D_THRE > 0:
+            valid_mask = valid_mask & (confs_3d > self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.CONFIDENCE_2D_THRE)
+        max_cls_scores = max_cls_scores[valid_mask]
+        max_cls_idxs = max_cls_idxs[valid_mask]
+        confs_3d = confs_3d[valid_mask]
+        bbox_preds = bbox_preds[valid_mask]
+
+        # Prediction scores
+        if self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.OUTPUT_CONFIDENCE == '2D':
+            scores = max_cls_scores.clone()   # Left shape: (B, num_query)
+        elif self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.OUTPUT_CONFIDENCE == '3D':
+            scores = confs_3d.clone()    # Left shape: (B, num_query)\
+        # Predicted classes
+        pred_classes = max_cls_idxs.clone()
+        # Predicted 3D boxes
+        pred_3D_center = bbox_preds[..., self.reg_key_manager('loc')].sigmoid() # Left shape: (B, num_query, 3)
+        pred_3D_center[..., 0] = pred_3D_center[..., 0] * (self.position_range[1] - self.position_range[0]) + self.position_range[0]
+        pred_3D_center[..., 1] = pred_3D_center[..., 1] * (self.position_range[3] - self.position_range[2]) + self.position_range[2]
+        pred_3D_center[..., 2] = pred_3D_center[..., 2] * (self.position_range[5] - self.position_range[4]) + self.position_range[4]
+        pred_dims = bbox_preds[..., self.reg_key_manager('dim')].exp()  # Left shape: (B, num_query, 3)
+        pred_pose = bbox_preds[..., self.reg_key_manager('pose')]   # Left shape: (B, num_query, 6)
+        pred_pose = rotation_6d_to_matrix(pred_pose.view(-1, 6)).view(B, -1, 3, 3)  # Left shape: (B, num_query, 3, 3)
+        pdb.set_trace()
+    
     def loss(self, detector_out, batched_inputs):
         all_cls_scores = detector_out['all_cls_scores'] # Left shape: (num_dec, B, num_query, cls_num)
         all_bbox_preds = detector_out['all_bbox_preds'] # Left shape: (num_dec, B, num_query, attr_num)
@@ -451,7 +502,7 @@ class PETR_HEAD(nn.Module):
         loss_dict = {'cls_loss_{}'.format(dec_idx): 0, 'loc_loss_{}'.format(dec_idx): 0, 'dim_loss_{}'.format(dec_idx): 0, 'pose_loss_{}'.format(dec_idx): 0}
         num_pos = 0
         for bs, (pred_idxs, gt_idxs) in enumerate(assign_results):
-            bs_cls_scores = cls_scores_list[bs][pred_idxs] # Left shape: (num_query, cls_num)
+            bs_cls_scores = cls_scores_list[bs] # Left shape: (num_all_query, cls_num)
             bs_bbox_preds = bbox_preds_list[bs][pred_idxs] # Left shape: (num_query, pred_attr_num)
             bs_loc_preds = bs_bbox_preds[..., self.reg_key_manager('loc')] # Left shape: (num_query, 3)
             bs_dim_preds = bs_bbox_preds[...,  self.reg_key_manager('dim')] # Left shape: (num_query, 3)
@@ -467,8 +518,9 @@ class PETR_HEAD(nn.Module):
             bs_pose_gts = bs_gt_instance.get('gt_poses').to(device)[gt_idxs] # Left shape: (num_gt, 3, 3)
             
             # Classification loss
-            bs_cls_cores_gts = F.one_hot(bs_cls_gts, num_classes = self.total_cls_num).float() # Left shape: (num_gt, 3)
-            loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * self.cls_loss(bs_cls_scores, bs_cls_cores_gts).sum()
+            bs_valid_cls_gts = bs_cls_gts.new_ones((self.num_query,)) * self.total_cls_num  # Left shape: (num_query,). All labels are set to background.
+            bs_valid_cls_gts[pred_idxs] = bs_cls_gts
+            loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * self.cls_loss(bs_cls_scores, bs_valid_cls_gts, bs_cls_scores.new_ones(self.num_query,), avg_factor=1)
 
             # Localization loss
             loss_dict['loc_loss_{}'.format(dec_idx)] += self.reg_weight * (math.sqrt(2) * self.reg_loss(bs_loc_preds, bs_loc_gts)\
