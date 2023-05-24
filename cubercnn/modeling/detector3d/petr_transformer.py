@@ -68,7 +68,7 @@ class PETRTransformer(BaseModule):
         self._is_init = True
 
 
-    def forward(self, x, mask, query_embed, pos_embed, reg_branch=None):
+    def forward(self, x, mask, query_embed, pos_embed, reg_branch=None, batched_inputs = None):
         """Forward function for `Transformer`.
         Args:
             x (Tensor): Input query with shape [bs, c, h, w] where
@@ -104,8 +104,9 @@ class PETRTransformer(BaseModule):
             query_pos=query_embed,
             key_padding_mask=mask,
             reg_branch=reg_branch,
+            batched_inputs = batched_inputs,
         )   # out_dec shape: (num_layers, num_query, bs, dim)
-        
+    
         out_dec = out_dec.transpose(1, 2)   # Left shape: (num_layers, bs, num_query, dim)
         memory = memory.reshape(h, w, bs, c).permute(2, 3, 0, 1)  # Left shape: (bs, c, h, w)
         return  out_dec, memory
@@ -184,7 +185,7 @@ class PETRDNTransformer(BaseModule):
             attn_masks=[attn_masks, None],
             reg_branch=reg_branch,
         )   # out_dec shape: (num_layers, num_query, bs, dim)
-        pdb.set_trace()
+        
         out_dec = out_dec.transpose(1, 2)
         memory = memory.reshape(n, h, w, bs, c).permute(3, 0, 4, 1, 2)
         return  out_dec, memory
@@ -277,8 +278,8 @@ class PETRTransformerDecoderLayer(BaseTransformerLayer):
         Returns:
             Tensor: forwarded results with shape [num_query, bs, embed_dims].
         """
-
-        if self.use_checkpoint and self.training:
+        
+        if self.use_checkpoint: #and self.training:
             x = cp.checkpoint(
                 self._forward, 
                 query,
@@ -301,6 +302,7 @@ class PETRTransformerDecoderLayer(BaseTransformerLayer):
             query_key_padding_mask=query_key_padding_mask,
             key_padding_mask=key_padding_mask
             )
+        
         return x
 
 @ATTENTION.register_module()

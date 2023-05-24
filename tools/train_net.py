@@ -143,7 +143,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
         
         # load ONLY the model, no checkpointables.
         checkpointer.load(cfg.MODEL.WEIGHTS_PRETRAIN, checkpointables=[])
-
+    
     # determine the starting iteration, if resuming
     start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1)
     iteration = start_iter
@@ -234,7 +234,6 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
                             diverging_model = torch.isnan(param.grad).any() or torch.isinf(param.grad).any()
                         
                         if diverging_model:
-                            pdb.set_trace()
                             logger.warning('Skipping gradient update due to inf/nan detection, loss is {}'.format(loss_dict_reduced))
                             break
 
@@ -449,6 +448,7 @@ def main(args):
             DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
                 cfg.MODEL.WEIGHTS, resume=args.resume
             )
+            
             return do_test(cfg, model)
 
         # setup distributed training.

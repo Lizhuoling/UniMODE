@@ -2,16 +2,11 @@ _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
   TRAIN: ('KITTI_train',)
-  TEST: ('KITTI_train',) 
+  TEST: ('KITTI_val',) 
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'car')
 
-INPUT:
-  MIN_SIZE_TRAIN: (512,)
-  MIN_SIZE_TEST: 512
-  RANDOM_FLIP: "none"
-
 SOLVER:
-  IMS_PER_BATCH: 1
+  IMS_PER_BATCH: 16
   TYPE: "adamw"
   BASE_LR: 2e-4
   MAX_ITER: 29000
@@ -32,7 +27,7 @@ MODEL:
 
       BACKBONE_NAME: 'ResNet50'
       NECK_NAME: 'CPFPN'
-      TRANSFORMER_NAME: 'DETR_TRANSFORMER'
+      TRANSFORMER_NAME: 'PETR_TRANSFORMR'
       MATCHER_NAME: 'HungarianAssigner3D'
       DEPTH_LID: True
       NUM_QUERY: 200

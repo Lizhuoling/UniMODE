@@ -813,7 +813,7 @@ class ROIHeads3D(StandardROIHeads):
             # assign predicted boxes if none exist    
             if not hasattr(instances_i, 'pred_boxes'):
                 instances_i.pred_boxes = pred_boxes_i
-
+            
             instances_i.pred_bbox3D = util.get_cuboid_verts_faces(cube_3D_i[:, :6], cube_pose_i)[0]
             instances_i.pred_center_cam = cube_3D_i[:, :3]
             instances_i.pred_center_2D = cube_3D_i[:, 6:8]

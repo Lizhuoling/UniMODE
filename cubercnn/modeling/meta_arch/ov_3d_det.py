@@ -83,7 +83,7 @@ class OV_3D_Det(nn.Module):
                 for key, value in all_positive_map_label_to_token.items():
                     self.class_name_emb.append(class_name_token_emb[value])
                 self.class_name_emb = torch.cat(self.class_name_emb, dim = 0)
-
+            
             self.forward_once_flag = True
 
     def pad_glip_outs(self, glip_outs):
@@ -170,46 +170,9 @@ class OV_3D_Det(nn.Module):
         return self.detector.loss(detector_out, batched_inputs)
 
     def forward_inference(self, detector_out, batched_inputs, glip_results, conf_thre = 0.01):
-        outputs = []
+        inference_results = self.detector.inference(detector_out, batched_inputs)
 
-        self.detector.inference(detector_out, batched_inputs)
-
-        cls_num = len(self.cfg.DATASETS.CATEGORY_NAMES)
-
-        for b_idx in range(len(batched_inputs)):
-            instance = Instances(image_size = (batched_inputs[b_idx]['height'], batched_inputs[b_idx]['width']))
-            # 2D det box
-            pred_classes = glip_results['labels'][b_idx]    # Left shape: (num_box,)
-            pred_scores = glip_results['scores'][b_idx] # Left shape: (num_box,)
-            valid_instance_flag = (pred_classes < cls_num) & (pred_scores > conf_thre)
-            pred_classes = pred_classes[valid_instance_flag]
-            
-            for cnt in range(pred_classes.shape[0]):
-                pred_classes[cnt] = self.local2global_cls_map[pred_classes[cnt].item()]
-            
-            instance.set(name = "pred_classes", value = pred_classes)
-            
-            height_scale = batched_inputs[b_idx]['height'] / batched_inputs[b_idx]['image'].shape[1]
-            width_scale = batched_inputs[b_idx]['width'] / batched_inputs[b_idx]['image'].shape[2]
-            glip_det_boxes = glip_results['bbox'][b_idx].view(-1, 2, 2)
-            glip_det_boxes[:, :, 0] = glip_det_boxes[:, :, 0] * width_scale # Transform the 2D det box results back to the original resolution
-            glip_det_boxes[:, :, 1] = glip_det_boxes[:, :, 1] * height_scale
-            pred_boxes = Boxes(glip_det_boxes.view(-1, 4)[valid_instance_flag])
-            instance.set(name = "pred_boxes", value = pred_boxes)
-
-            pred_scores = pred_scores[valid_instance_flag]
-            instance.set(name = "scores", value = pred_scores)
-            
-            '''instance.set(name = "scores_full", value = [])
-            instance.set(name = "pred_bbox3D", value = [])
-            instance.set(name = "pred_center_cam", value = [])
-            instance.set(name = "pred_center_2D", value = [])
-            instance.set(name = "pred_dimensions", value = [])
-            instance.set(name = "'pred_pose", value = [])'''
-
-            outputs.append(dict(instances = instance))
-
-        return outputs
+        return inference_results
 
     def extract_cls_emb(self, cls_idxs, positive_map_label_to_token):
         cls_emb_list = []

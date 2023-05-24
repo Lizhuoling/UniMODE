@@ -10,23 +10,23 @@ import torch.nn.functional as F
 from detectron2.modeling.backbone.fpn import FPN
 
 class ResNet(Backbone):
-    def __init__(self, cfg, input_shape, pretrained=True):
+    def __init__(self, RESNTE_DEPTH, input_shape, pretrained=True):
         super().__init__()
 
-        if cfg.MODEL.RESNETS.DEPTH == 18:
+        if RESNTE_DEPTH == 18:
             base  = models.resnet18(pretrained)
             self._out_feature_channels = {'p2': 64, 'p3': 128, 'p4': 256, 'p5': 512, 'p6': 512}
-        elif cfg.MODEL.RESNETS.DEPTH == 34:
+        elif RESNTE_DEPTH == 34:
             base  = models.resnet34(pretrained)
             self._out_feature_channels = {'p2': 64, 'p3': 128, 'p4': 256, 'p5': 512, 'p6': 512}
-        elif cfg.MODEL.RESNETS.DEPTH == 50:
+        elif RESNTE_DEPTH == 50:
             base  = models.resnet50(pretrained)
             self._out_feature_channels = {'p2': 256, 'p3': 512, 'p4': 1024, 'p5': 2048, 'p6': 2048}
-        elif cfg.MODEL.RESNETS.DEPTH == 101:
+        elif RESNTE_DEPTH == 101:
             base  = models.resnet101(pretrained)
             self._out_feature_channels = {'p2': 256, 'p3': 512, 'p4': 1024, 'p5': 2048, 'p6': 2048}
         else:
-            raise ValueError('No configuration currently supporting depth of {}'.format(cfg.MODEL.RESNETS.DEPTH))
+            raise ValueError('No configuration currently supporting depth of {}'.format(RESNTE_DEPTH))
         
         self.conv1 = base.conv1
         self.bn1 = base.bn1
