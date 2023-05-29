@@ -14,3 +14,8 @@ cubercnn/external/
 *~
 *.so
 *.ipynb
+
+mmdetection3d
+maskrcnn_benchmark.egg-info
+pytorch3d 
+detectron2
