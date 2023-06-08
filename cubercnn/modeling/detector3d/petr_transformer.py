@@ -21,6 +21,7 @@ from mmcv.cnn.bricks.transformer import (BaseTransformerLayer,
                                          build_transformer_layer_sequence)
 from mmcv.cnn.bricks.drop import build_dropout
 from mmdet.models.utils.builder import TRANSFORMER
+#from mmdet.registry import TASK_UTILS
 from mmcv.cnn import (build_activation_layer, build_conv_layer,
                       build_norm_layer, xavier_init)
 from mmcv.runner.base_module import BaseModule

@@ -13,6 +13,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+#from mmdet.models.task_modules.assigners import AssignResult, BaseAssigner
+#from mmdet.models.task_modules import BBOX_ASSIGNERS, build_match_cost
+#from mmdet.models.layers.transformer import inverse_sigmoid
+
 from mmdet.core.bbox.builder import BBOX_ASSIGNERS
 from mmdet.core.bbox.assigners import AssignResult
 from mmdet.core.bbox.assigners import BaseAssigner

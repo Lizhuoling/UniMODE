@@ -1,7 +1,9 @@
 import torch
 from mmdet.core.bbox.match_costs.builder import MATCH_COST
-from mmdet.core.bbox.iou_calculators import bbox_overlaps
+#from mmdet.registry import TASK_UTILS
 
+
+#@TASK_UTILS.register_module()
 @MATCH_COST.register_module()
 class BBox3DL1Cost(object):
     """BBox3DL1Cost.

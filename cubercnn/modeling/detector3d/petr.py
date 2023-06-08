@@ -20,6 +20,9 @@ from mmdet.models import build_neck
 from mmdet.models.utils import build_transformer
 from mmdet.models.utils.transformer import inverse_sigmoid
 from mmcv.cnn.bricks.transformer import build_positional_encoding
+#from mmdet.models.task_modules import build_assigner, build_sampler
+#from mmdet.models.utils import multi_apply
+#from mmdet.utils import reduce_mean
 from mmdet.core import build_assigner, build_sampler, multi_apply, reduce_mean
 from mmdet.models import build_loss
 

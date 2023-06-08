@@ -563,8 +563,7 @@ class VLDyHead(torch.nn.Module):
         self.cfg = cfg
         # bert_cfg = BertConfig.from_pretrained(cfg.MODEL.LANGUAGE_BACKBONE.MODEL_TYPE)
         if cfg.MODEL.LANGUAGE_BACKBONE.MODEL_TYPE == "bert-base-uncased":
-            bert_name = "/home/twilight/twilight/data/HuggingFace/bert-base-uncased"
-            lang_cfg = BertConfig.from_pretrained(bert_name)
+            lang_cfg = BertConfig.from_pretrained(cfg.MODEL.LANGUAGE_BACKBONE.MODEL_TYPE)
         elif cfg.MODEL.LANGUAGE_BACKBONE.MODEL_TYPE == "clip":
             lang_cfg = cfg
         else:
@@ -762,7 +761,7 @@ class VLDyHead(torch.nn.Module):
             proj_tokens = F.normalize(
                 self.contrastive_align_projection_text(embedding), p=2, dim=-1
             )
-        
+
         # dot product soft token
         dot_product_logits = None
         dot_product_proj_tokens = None
@@ -774,7 +773,7 @@ class VLDyHead(torch.nn.Module):
             dot_product_proj_tokens = self.dot_product_projection_text(embedding / 2.0)
             # w/o norm
             # dot_product_proj_tokens = self.dot_product_projection_text(embedding / 28.0)
-            
+
             dot_product_proj_tokens_bias = torch.matmul(embedding, self.bias_lang) + self.bias0
 
         # shallow contrastive (original feature from image & text encoder)

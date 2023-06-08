@@ -649,7 +649,7 @@ class ATSSPostProcessor(torch.nn.Module):
             scores = convert_grounding_to_od_logits(logits=token_logits, box_cls=box_cls, positive_map=positive_map,
                                                     score_agg=self.score_agg)
             box_cls = scores
-        
+
         # binary dot product focal version
         if dot_product_logits is not None:
             #print('Dot Product.')
@@ -682,13 +682,13 @@ class ATSSPostProcessor(torch.nn.Module):
         box_cls = box_cls * centerness[:, :, None]
 
         results = []
-        
+
         for per_box_cls, per_box_regression, per_pre_nms_top_n, per_candidate_inds, per_anchors \
                 in zip(box_cls, box_regression, pre_nms_top_n, candidate_inds, anchors):
             per_box_cls = per_box_cls[per_candidate_inds]
-            
+
             per_box_cls, top_k_indices = per_box_cls.topk(per_pre_nms_top_n, sorted=False)
-            
+
             per_candidate_nonzeros = per_candidate_inds.nonzero()[top_k_indices, :]
 
             per_box_loc = per_candidate_nonzeros[:, 0]

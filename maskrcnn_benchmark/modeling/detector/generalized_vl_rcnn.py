@@ -88,9 +88,6 @@ class GeneralizedVLRCNN(nn.Module):
             else:
                 self.tokenizer = CLIPTokenizerFast.from_pretrained("openai/clip-vit-base-patch32",
                                                                             from_slow=True)
-        elif cfg.MODEL.LANGUAGE_BACKBONE.TOKENIZER_TYPE == 'bert-base-uncased':
-            bert_name = "/home/twilight/twilight/data/HuggingFace/bert-base-uncased"
-            self.tokenizer = AutoTokenizer.from_pretrained(bert_name)
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(cfg.MODEL.LANGUAGE_BACKBONE.TOKENIZER_TYPE)
         self.tokenizer_vocab = self.tokenizer.get_vocab()
@@ -234,7 +231,7 @@ class GeneralizedVLRCNN(nn.Module):
                 
                 tokenizer_input = {"input_ids": input_ids,
                                 "attention_mask": tokenized.attention_mask}
-                
+
                 if self.cfg.MODEL.LANGUAGE_BACKBONE.FREEZE:
                     with torch.no_grad():
                         language_dict_features = self.language_backbone(tokenizer_input)
@@ -286,7 +283,6 @@ class GeneralizedVLRCNN(nn.Module):
         else:
             proposals, proposal_losses, fused_visual_features = self.rpn(images, visual_features, targets, language_dict_features, positive_map,
                                               captions, swint_feature_c4)
-            
         if self.roi_heads:
             if self.cfg.MODEL.ROI_MASK_HEAD.PREDICTOR.startswith("VL"):
                 if self.training:

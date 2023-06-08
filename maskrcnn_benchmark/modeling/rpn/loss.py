@@ -543,9 +543,6 @@ class ATSSLossComputation(torch.nn.Module):
             else:
                 self.tokenizer = CLIPTokenizerFast.from_pretrained("openai/clip-vit-base-patch32",
                                                                             from_slow=True)
-        elif self.cfg.MODEL.LANGUAGE_BACKBONE.TOKENIZER_TYPE == 'bert-base-uncased':
-            bert_name = "/home/twilight/twilight/data/HuggingFace/bert-base-uncased"
-            self.tokenizer = AutoTokenizer.from_pretrained(bert_name)
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(self.lang)
 
