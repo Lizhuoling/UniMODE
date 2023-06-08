@@ -27,4 +27,5 @@ rm -rf build
 pip install -e .
 cd ..
 
+rm -rf build
 python setup_maskrcnn_benchmark.py develop
