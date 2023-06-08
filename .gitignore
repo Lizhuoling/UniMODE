@@ -19,3 +19,5 @@ mmdetection3d
 maskrcnn_benchmark.egg-info
 pytorch3d 
 detectron2
+cocoapi
+datasets
