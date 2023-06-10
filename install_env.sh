@@ -17,10 +17,17 @@ pip install mmdet3d==v1.0.0rc4
 pip install cython opencv-python timm transformers einops ftfy
 pip install 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'
 
+apt-get autoremove nvidia-cuda-toolkit
+# Addthe following to .bashrc
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64
+export PATH=$PATH:/usr/local/cuda/bin
+export CUDA_HOME=/usr/local/cuda
+
+rm -rf detectron2
 git clone https://gitee.com/twilightLZL/detectron2.git
 python -m pip install -e detectron2
-#python -m pip install detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cu111/torch1.9/index.html
 
+rm -rf pytorch3d
 git clone https://gitee.com/twilightLZL/pytorch3d.git
 cd pytorch3d 
 rm -rf build
