@@ -14,7 +14,7 @@ pip install mmdet==v2.28.2
 pip install mmsegmentation==0.30.0
 pip install mmdet3d==v1.0.0rc4
 
-pip install cython opencv-python timm transformers einops ftfy
+pip install cython opencv-python timm transformers einops ftfy opencv-python-headless
 pip install 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'
 
 apt-get autoremove nvidia-cuda-toolkit
@@ -36,3 +36,5 @@ cd ..
 
 rm -rf build
 python setup_maskrcnn_benchmark.py develop
+
+pip install setuptools==59.5.0

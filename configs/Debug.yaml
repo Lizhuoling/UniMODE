@@ -2,16 +2,11 @@ _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
   TRAIN: ('KITTI_train',)
-  TEST: ('KITTI_train',) 
+  TEST: ('KITTI_val',) 
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'car')
 
-INPUT:
-  MIN_SIZE_TRAIN: (512,)
-  MIN_SIZE_TEST: 512
-  RANDOM_FLIP: "none"
-
 SOLVER:
-  IMS_PER_BATCH: 1
+  IMS_PER_BATCH: 16
   TYPE: "adamw"
   BASE_LR: 2e-4
   MAX_ITER: 29000
@@ -38,11 +33,11 @@ MODEL:
       NUM_QUERY: 200
 
       HEAD:
-        OV_CLS_HEAD: False
         UNCERN_RANGE: [-10, 10]
         CLS_WEIGHT: 2.0
         REG_WEIGHT: 0.25
-        IOU_WEIGHT: 0.0
+        DET_2D_L1_WEIGHT: 5.0
+        DET_2D_GIOU_WEIGHT: 2.0
 
       POST_PROCESS:
         CONFIDENCE_2D_THRE: 0.3

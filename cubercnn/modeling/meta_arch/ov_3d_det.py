@@ -159,18 +159,20 @@ class OV_3D_Det(nn.Module):
             if xyz[:, 2].max() > self.max_range[5]:
                 self.max_range[5] = xyz[:, 2].max()
             print('max_range:', self.max_range)'''
-
+        
+        ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)
+        
         if self.training:
-            loss_dict = self.forward_train(detector_out, batched_inputs)
+            loss_dict = self.forward_train(detector_out, batched_inputs, ori_img_resolution)
             return loss_dict
         else:
-            return self.forward_inference(detector_out, batched_inputs, glip_results)
+            return self.forward_inference(detector_out, batched_inputs, ori_img_resolution)
         
-    def forward_train(self, detector_out, batched_inputs):
-        return self.detector.loss(detector_out, batched_inputs)
+    def forward_train(self, detector_out, batched_inputs, ori_img_resolution):
+        return self.detector.loss(detector_out, batched_inputs, ori_img_resolution)
 
-    def forward_inference(self, detector_out, batched_inputs, glip_results, conf_thre = 0.01):
-        inference_results = self.detector.inference(detector_out, batched_inputs)
+    def forward_inference(self, detector_out, batched_inputs, ori_img_resolution, conf_thre = 0.01):
+        inference_results = self.detector.inference(detector_out, batched_inputs, ori_img_resolution)
 
         return inference_results
 
@@ -324,10 +326,9 @@ def create_queries_and_maps(labels, label_list, additional_labels = None, cfg = 
     print(objects_query)
 
     from transformers import AutoTokenizer
-    # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
     if cfg.MODEL.LANGUAGE_BACKBONE.TOKENIZER_TYPE == "bert-base-uncased":
-        bert_name = "/home/twilight/twilight/data/HuggingFace/bert-base-uncased"
-        tokenizer = AutoTokenizer.from_pretrained(bert_name)
+        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
         tokenized = tokenizer(objects_query, return_tensors="pt")
     elif cfg.MODEL.LANGUAGE_BACKBONE.TOKENIZER_TYPE == "clip":
         from transformers import CLIPTokenizerFast

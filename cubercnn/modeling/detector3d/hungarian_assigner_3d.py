@@ -9,6 +9,7 @@
 # ------------------------------------------------------------------------
 import pdb
 import math
+import numpy  as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,6 +28,7 @@ from mmdet.core.bbox.match_costs import build_match_cost
 from scipy.optimize import linear_sum_assignment
 from pytorch3d.transforms import rotation_6d_to_matrix
 from pytorch3d.transforms.so3 import so3_relative_angle
+from cubercnn.util.util import box_cxcywh_to_xyxy, generalized_box_iou
 
 @BBOX_ASSIGNERS.register_module()
 class HungarianAssigner3D(BaseAssigner):
@@ -54,10 +56,11 @@ class HungarianAssigner3D(BaseAssigner):
                 intersection over union). Default "giou".
     """
 
-    def __init__(self, cls_weight=1.0, reg_weight = 1.0, iou_weight = 0.0, total_cls_num = None, uncern_range = (-10, 10)):
+    def __init__(self, cls_weight=1.0, reg_weight = 1.0, det2d_l1_weight = 5.0, det2d_iou_weight = 2.0, total_cls_num = None, uncern_range = (-10, 10)):
         self.cls_weight = cls_weight
         self.reg_weight = reg_weight
-        self.iou_weight = iou_weight
+        self.det2d_l1_weight = det2d_l1_weight
+        self.det2d_iou_weight = det2d_iou_weight
         self.total_cls_num = total_cls_num
         self.uncern_range = uncern_range
         #self.cls_loss = nn.BCEWithLogitsLoss(reduction = 'none')
@@ -67,7 +70,7 @@ class HungarianAssigner3D(BaseAssigner):
         self.iou_cost = build_match_cost({'type': 'IoUCost', 'weight': 1.0})
 
     @torch.no_grad()
-    def assign(self, bbox_preds, cls_scores, batch_input, reg_key_manager, eps=1e-7):
+    def assign(self, bbox_preds, cls_scores, batch_input, reg_key_manager, ori_img_resolution, eps=1e-7):
         """
         Input:
             bbox_preds shape: (num_query, attr_num), attr order: ('loc', 'dim', 'pose', 'uncern')
@@ -84,21 +87,21 @@ class HungarianAssigner3D(BaseAssigner):
         pose_preds = rotation_6d_to_matrix(pose_preds)  # Left shape: (num_query, 3, 3)
         uncern_preds = bbox_preds[..., reg_key_manager('uncern')] # Left shape: (num_query, 1)
         uncern_preds = torch.clamp(uncern_preds, min = self.uncern_range[0],  max = self.uncern_range[1])
+        det2d_xywh_preds = bbox_preds[..., reg_key_manager('det2d_xywh')] # Left shape: (num_query, 4)
         
         cls_gts = gt_instance.get('gt_classes').to(device) # Left shape: (num_gt,)
         loc_gts = gt_instance.get('gt_boxes3D')[..., 6:9].to(device) # Left shape: (num_gt, 3)
         dim_gts = gt_instance.get('gt_boxes3D')[..., 3:6].to(device) # Left shape: (num_gt, 3)
         pose_gts = gt_instance.get('gt_poses').to(device) # Left shape: (num_gt, 3, 3)
-        
+        det2d_xywh_gts = gt_instance.get('gt_boxes').to(device).tensor  # Left shape: (num_gt, 4)
+        img_scale = torch.cat((ori_img_resolution, ori_img_resolution), dim = 0)    # Left shape: (4,)
+        det2d_xywh_gts = det2d_xywh_gts / img_scale[None]   # Left shape: (num_gt, 4)
         indices = []
         if num_gts == 0:
             indices.append([[], []])
             return [(torch.as_tensor(i, dtype = torch.int64), torch.as_tensor(j, dtype = torch.int64)) for i, j in indices]
 
         cls_cost = self.cls_weight * self.cls_loss(cls_scores, cls_gts) # Left shape: (num_query, num_gt)
-        #cls_scores = cls_scores.unsqueeze(1).expand(-1, num_gts, -1)    # Left shape: (num_query, num_gt, cls_num)
-        #cls_cores_gts = F.one_hot(cls_gts, num_classes = self.total_cls_num)[None].expand(num_preds, -1, -1).float()    # Left shape: (num_query, num_gt, cls_num)
-        #cls_cost = self.cls_weight * self.cls_loss(cls_scores, cls_cores_gts).sum(-1) # Left shape: (num_query, num_gt)
         
         loc_preds = loc_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 3)
         uncern_preds = uncern_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 1)
@@ -112,8 +115,15 @@ class HungarianAssigner3D(BaseAssigner):
         pose_preds = pose_preds.unsqueeze(1).expand(-1, num_gts, -1, -1).reshape(num_preds * num_gts, 3, 3)    # Left shape: (num_query, num_gt, 3, 3)
         pose_gts = pose_gts[None].expand(num_preds, -1, -1, -1).reshape(num_preds * num_gts, 3, 3) # Left shape: (num_query, num_gt, 3, 3)
         cost_pose = self.reg_weight * (1-so3_relative_angle(pose_preds, pose_gts, eps=0.1, cos_angle=True)).view(num_preds, num_gts)  # Left shape: (num_query, num_gt)
-        
-        cost = cls_cost + loc_cost + dim_cost + cost_pose # Left shape: (num_query, num_gt)
+
+        det2d_reg_loss = self.det2d_l1_weight * self.reg_loss(det2d_xywh_preds[:, None].expand(-1, num_gts, -1), 
+            det2d_xywh_gts[None].expand(num_preds, -1, -1)).sum(-1)  # Left shape: (num_query, num_gt)
+        det2d_iou_loss = -self.det2d_iou_weight * generalized_box_iou(
+            box_cxcywh_to_xyxy(det2d_xywh_preds),
+            box_cxcywh_to_xyxy(det2d_xywh_gts)
+        )   # Left shape: (num_query, num_gt)
+
+        cost = cls_cost + loc_cost + dim_cost + cost_pose + det2d_reg_loss + det2d_iou_loss # Left shape: (num_query, num_gt)
         indices.append(linear_sum_assignment(cost.cpu().numpy()))
         
         return [(torch.as_tensor(i, dtype = torch.int64), torch.as_tensor(j, dtype = torch.int64)) for i, j in indices]

@@ -1,4 +1,4 @@
-exp_id=Base_Omni3D_in
+exp_id=OV_base1_kittitrain_noGLIP_closehead_detr
 
 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
