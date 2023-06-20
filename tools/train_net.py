@@ -454,6 +454,7 @@ def main(args):
         # setup distributed training.
         distributed = comm.get_world_size() > 1
         if distributed:
+            model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
             model = DistributedDataParallel(
                 model, device_ids=[comm.get_local_rank()], 
                 broadcast_buffers=False, find_unused_parameters=True

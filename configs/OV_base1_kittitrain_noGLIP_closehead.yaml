@@ -27,7 +27,7 @@ MODEL:
 
       BACKBONE_NAME: 'ResNet50'
       NECK_NAME: 'CPFPN'
-      TRANSFORMER_NAME: 'PETR_TRANSFORMR'
+      TRANSFORMER_NAME: 'PETR_TRANSFORMER'
       MATCHER_NAME: 'HungarianAssigner3D'
       DEPTH_LID: True
       NUM_QUERY: 200
@@ -37,7 +37,8 @@ MODEL:
         UNCERN_RANGE: [-10, 10]
         CLS_WEIGHT: 2.0
         REG_WEIGHT: 0.25
-        IOU_WEIGHT: 0.0
+        DET_2D_L1_WEIGHT: 5.0
+        DET_2D_GIOU_WEIGHT: 2.0
 
       POST_PROCESS:
         CONFIDENCE_2D_THRE: 0.3

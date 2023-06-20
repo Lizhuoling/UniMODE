@@ -1,7 +1,8 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
+import pdb
 import torch
 from typing import Any, Dict, List, Set
 from detectron2.solver.build import maybe_add_gradient_clipping
+from torch.nn.parallel import DistributedDataParallel
 
 def build_optimizer(cfg, model):
     norm_module_types = (
@@ -18,33 +19,47 @@ def build_optimizer(cfg, model):
     )
     params: List[Dict[str, Any]] = []
     memo: Set[torch.nn.parameter.Parameter] = set()
-    for module in model.modules():
-        for key, value in module.named_parameters(recurse=False):
-            if not value.requires_grad:
-                continue
-            # Avoid duplicating parameters
-            if value in memo:
-                continue
-            memo.add(value)
-            
-            lr = cfg.SOLVER.BASE_LR
-            weight_decay = cfg.SOLVER.WEIGHT_DECAY
 
-            if isinstance(module, norm_module_types) and (cfg.SOLVER.WEIGHT_DECAY_NORM is not None):
-                weight_decay = cfg.SOLVER.WEIGHT_DECAY_NORM
-            
-            elif key == "bias":
-                if (cfg.SOLVER.BIAS_LR_FACTOR is not None):
-                    lr = cfg.SOLVER.BASE_LR * cfg.SOLVER.BIAS_LR_FACTOR
-                if (cfg.SOLVER.WEIGHT_DECAY_BIAS is not None):
-                    weight_decay = cfg.SOLVER.WEIGHT_DECAY_BIAS
+    # For RCNN3D
+    if cfg.SOLVER.TYPE == 'sgd':
+        for module in model.modules():
+            for key, value in module.named_parameters(recurse=False):
+                if not value.requires_grad:
+                    continue
+                # Avoid duplicating parameters
+                if value in memo:
+                    continue
+                memo.add(value)
+                
+                lr = cfg.SOLVER.BASE_LR
+                weight_decay = cfg.SOLVER.WEIGHT_DECAY
 
-            # these params do not need weight decay at all
-            # TODO parameterize these in configs instead.
-            if key in ['priors_dims_per_cat', 'priors_z_scales', 'priors_z_stats']:
-                weight_decay = 0.0
+                if isinstance(module, norm_module_types) and (cfg.SOLVER.WEIGHT_DECAY_NORM is not None):
+                    weight_decay = cfg.SOLVER.WEIGHT_DECAY_NORM
+                
+                elif key == "bias":
+                    if (cfg.SOLVER.BIAS_LR_FACTOR is not None):
+                        lr = cfg.SOLVER.BASE_LR * cfg.SOLVER.BIAS_LR_FACTOR
+                    if (cfg.SOLVER.WEIGHT_DECAY_BIAS is not None):
+                        weight_decay = cfg.SOLVER.WEIGHT_DECAY_BIAS
 
-            params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
+                # these params do not need weight decay at all
+                # TODO parameterize these in configs instead.
+                if key in ['priors_dims_per_cat', 'priors_z_scales', 'priors_z_stats']:
+                    weight_decay = 0.0
+
+                params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
+    # For PETR
+    elif cfg.SOLVER.TYPE == 'adamw':
+        lr = cfg.SOLVER.BASE_LR
+        lr_mult = 0.25
+        if type(model) == DistributedDataParallel: model = model.module
+        backbone_params_ids = list(map(id, model.detector.img_backbone.parameters()))
+        normal_params = filter(lambda p: id(p) not in backbone_params_ids, model.parameters())
+        params = [
+            {"params": normal_params, "lr": lr},
+            {"params": model.detector.img_backbone.parameters(), "lr": lr_mult * lr},
+        ]
 
     if cfg.SOLVER.TYPE == 'sgd':
         optimizer = torch.optim.SGD(
