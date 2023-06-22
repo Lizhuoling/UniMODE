@@ -173,7 +173,7 @@ class OV_3D_Det(nn.Module):
 
     def forward_inference(self, detector_out, batched_inputs, ori_img_resolution, conf_thre = 0.01):
         inference_results = self.detector.inference(detector_out, batched_inputs, ori_img_resolution)
-        pdb.set_trace()
+        
         return inference_results
 
     def extract_cls_emb(self, cls_idxs, positive_map_label_to_token):
@@ -233,8 +233,6 @@ def vis_2d_det(boxlist, img, class_names, conf_thre = 0.5):
         img = cv2.rectangle(img, box_loc[0:2], box_loc[2:4], (0, 255, 0))
         img = cv2.putText(img, "{:s}: {:.2f}".format(class_name, box_confs[cnt]), box_loc[0:2], cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 255, 0))
     cv2.imwrite('vis.png', img)
-    pdb.set_trace()
-
 
 def create_queries_and_maps_from_dataset(categories, cfg):
     
