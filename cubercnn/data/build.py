@@ -176,12 +176,14 @@ def repeat_factors_from_category_frequency(dataset_dicts, repeat_thresh):
 
 @configurable(from_config=_train_loader_from_config)
 def build_detection_train_loader(dataset, *, mapper, sampler=None, total_batch_size, aspect_ratio_grouping=True, num_workers=0):
+    
     if isinstance(dataset, list):
         dataset = DatasetFromList(dataset, copy=False)
     if mapper is not None:
         dataset = MapDataset(dataset, mapper)
     if sampler is None:
-        sampler = TrainingSampler(len(dataset))
+        sampler = TrainingSampler(len(dataset)) 
+
     assert isinstance(sampler, torch.utils.data.sampler.Sampler)
     return build_batch_data_loader(
         dataset,
@@ -190,6 +192,17 @@ def build_detection_train_loader(dataset, *, mapper, sampler=None, total_batch_s
         aspect_ratio_grouping=aspect_ratio_grouping,
         num_workers=num_workers
     )
+
+    # For debug
+    '''sampler = InferenceSampler(len(dataset))
+    batch_sampler = torch.utils.data.sampler.BatchSampler(sampler, 1, drop_last=False)
+    data_loader = torch.utils.data.DataLoader(
+        dataset,
+        num_workers=num_workers,
+        batch_sampler=batch_sampler,
+        collate_fn=trivial_batch_collator,
+    )'''
+    return data_loader
 
 def _test_loader_from_config(cfg, dataset_name, mapper=None):
     if isinstance(dataset_name, str):

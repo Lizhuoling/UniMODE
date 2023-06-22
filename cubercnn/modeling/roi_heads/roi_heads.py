@@ -809,7 +809,7 @@ class ROIHeads3D(StandardROIHeads):
             # assign box classes if none exist
             if not hasattr(instances_i, 'pred_classes'):
                 instances_i.pred_classes = box_classes_i
-
+            
             # assign predicted boxes if none exist    
             if not hasattr(instances_i, 'pred_boxes'):
                 instances_i.pred_boxes = pred_boxes_i

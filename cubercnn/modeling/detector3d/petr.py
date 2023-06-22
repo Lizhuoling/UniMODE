@@ -11,7 +11,7 @@ import torch.distributed as dist
 
 from pytorch3d.transforms import rotation_6d_to_matrix
 from pytorch3d.transforms.so3 import so3_relative_angle
-from detectron2.structures import Instances
+from detectron2.structures import Instances, Boxes
 
 from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn import Conv2d, Linear, build_activation_layer, bias_init_with_prob
@@ -61,8 +61,9 @@ class DETECTOR_PETR(nn.Module):
         if self.grid_mask and self.training:   
             imgs = self.grid_mask(imgs)
         backbone_feat_list = self.img_backbone(imgs)
-        neck_feat_list = self.img_neck(backbone_feat_list)
+        if type(backbone_feat_list) == dict: backbone_feat_list = list(backbone_feat_list.values())
         
+        neck_feat_list = self.img_neck(backbone_feat_list)
         return neck_feat_list
 
     def forward(self, images, batched_inputs, glip_results, class_name_emb):
@@ -139,19 +140,34 @@ def backbone_cfgs(backbone_name):
             dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False),
             stage_with_dcn=(False, False, True, True),
             pretrained = 'MODEL/resnet50_msra-5891d200.pth',
-        )
+        ),
+        VoVNet = dict(
+            type='VoVNet', ###use checkpoint to save memory
+            spec_name='V-99-eSE',
+            norm_eval=True,
+            frozen_stages=-1,
+            input_ch=3,
+            out_features=('stage4','stage5',),
+            pretrained = 'MODEL/fcos3d_vovnet_imgbackbone-remapped.pth',
+        ),
     )
 
     return cfgs[backbone_name]
 
 def neck_cfgs(neck_name):
     cfgs = dict(
-        CPFPN = dict(
+        CPFPN_Res50 = dict(
             type='CPFPN',
             in_channels=[1024, 2048],
             out_channels=256,
             num_outs=2,
-        )
+        ),
+        CPFPN_VoV = dict(
+            type='CPFPN',
+            in_channels=[768, 1024],
+            out_channels=256,
+            num_outs=2,
+        ),
     )
 
     return cfgs[neck_name]
@@ -186,7 +202,7 @@ def transformer_cfgs(transformer_name):
         ),
         DETR_TRANSFORMER = dict(
             hidden_dim=256,
-            dropout=0.1,
+            dropout=0.1, 
             nheads=8,
             dim_feedforward=2048,
             enc_layers=0,
@@ -433,7 +449,7 @@ class PETR_HEAD(nn.Module):
         for lvl in range(outs_dec.shape[0]):
             dec_cls_emb = self.cls_branches[lvl](outs_dec[lvl]) # Left shape: (B, num_query, emb_len) or (B, num_query, cls_num)
             dec_reg_result = self.reg_branches[lvl](outs_dec[lvl])  # Left shape: (B, num_query, reg_total_len)
-
+            
             if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.OV_CLS_HEAD:
                 bias = dot_product_proj_tokens_bias.unsqueeze(1).repeat(1, self.num_query, 1)  
                 dot_product_logit = (torch.matmul(dec_cls_emb, dot_product_proj_tokens.transpose(-1, -2)) / self.log_scale.exp()) + bias    # Left shape: (B, num_query, cls_num)
@@ -478,7 +494,7 @@ class PETR_HEAD(nn.Module):
         inference_results = []
         for bs in range(B):
             bs_instance = Instances(image_size = (batched_inputs[bs]['height'], batched_inputs[bs]['width']))
-
+        
             valid_mask = torch.ones_like(max_cls_scores[bs], dtype = torch.bool)
             if self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.CONFIDENCE_2D_THRE > 0:
                 valid_mask = valid_mask & (max_cls_scores[bs] > self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.CONFIDENCE_2D_THRE)
@@ -514,14 +530,19 @@ class PETR_HEAD(nn.Module):
             initial_reso = torch.Tensor([initial_w, initial_h, initial_w, initial_h]).to(img_reso.device)
             resize_scale = initial_reso / img_reso
             bs_pred_2ddet = bs_pred_2ddet * resize_scale[None]
+            # Obtain the projected 3D center on the original image resolution without augmentation
+            Ks = torch.Tensor(np.array(batched_inputs[bs]['K'])).cuda() # Original K. Left shape: (3, 3)
+            proj_centers_3d = (Ks @ bs_pred_3D_center.unsqueeze(-1)).squeeze(-1)    # Left shape: (valid_query_num, 3)
+            proj_centers_3d = proj_centers_3d[:, :2] / proj_centers_3d[:, 2:3]  # Left shape: (valid_query_num, 2)
             
             bs_instance.scores = bs_scores
-            bs_instance.pred_boxes = bs_pred_2ddet
+            bs_instance.pred_boxes = Boxes(bs_pred_2ddet)
             bs_instance.pred_classes = bs_pred_classes
             bs_instance.pred_bbox3D = cubercnn_util.get_cuboid_verts_faces(bs_cube_3D, bs_pred_pose)[0]
             bs_instance.pred_center_cam = bs_cube_3D[:, :3]
             bs_instance.pred_dimensions = bs_cube_3D[:, 3:6]
             bs_instance.pred_pose = bs_pred_pose
+            bs_instance.pred_center_2D = proj_centers_3d
             
             inference_results.append(dict(instances = bs_instance))
         

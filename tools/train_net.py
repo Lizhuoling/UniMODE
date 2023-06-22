@@ -134,7 +134,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
     
     # create the dataloader
     data_mapper = DatasetMapper3D(cfg, is_train=True)
-    data_loader = build_detection_train_loader(cfg, mapper=data_mapper, dataset_id_to_src=dataset_id_to_src)
+    data_loader = build_detection_train_loader(cfg, mapper=data_mapper, dataset_id_to_src=dataset_id_to_src, num_workers = 4)
 
     # give the mapper access to dataset_ids
     data_mapper.dataset_id_to_unknown_cats = dataset_id_to_unknown_cats
@@ -143,9 +143,9 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
         
         # load ONLY the model, no checkpointables.
         checkpointer.load(cfg.MODEL.WEIGHTS_PRETRAIN, checkpointables=[])
-    
+        
     # determine the starting iteration, if resuming
-    start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1)
+    start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS_PRETRAIN, resume=resume).get("iteration", -1) + 1)
     iteration = start_iter
 
     logger.info("Starting training from iteration {}".format(start_iter))
@@ -427,7 +427,7 @@ def main(args):
 
         # compute priors given the training data.
         priors = util.compute_priors(cfg, datasets)
-    
+        
     '''
     The training loops can attempt to train for N times.
     This catches a divergence or other failure modes. 

@@ -2,7 +2,7 @@ _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
   TRAIN: ('KITTI_train',)
-  TEST: ('KITTI_val',) 
+  TEST: ('KITTI_train',) 
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'car')
 
 SOLVER:
@@ -16,6 +16,11 @@ SOLVER:
   WARMUP_ITERS: 500
   WARMUP_METHOD: "linear"
 
+INPUT:
+  MIN_SIZE_TRAIN: (512,)
+  MIN_SIZE_TEST: 512
+  RANDOM_FLIP: "none"
+
 MODEL:
   META_ARCHITECTURE: "OV_3D_Det"
 
@@ -23,11 +28,11 @@ MODEL:
     DETECT_ARCHITECTURE: "petr"
 
     PETR:
-      GRID_MASK: True
+      GRID_MASK: False
 
       BACKBONE_NAME: 'ResNet50'
       NECK_NAME: 'CPFPN'
-      TRANSFORMER_NAME: 'PETR_TRANSFORMER'
+      TRANSFORMER_NAME: 'DETR_TRANSFORMER'
       MATCHER_NAME: 'HungarianAssigner3D'
       DEPTH_LID: True
       NUM_QUERY: 200
@@ -41,7 +46,7 @@ MODEL:
         DET_2D_GIOU_WEIGHT: 2.0
 
       POST_PROCESS:
-        CONFIDENCE_2D_THRE: 0.1
+        CONFIDENCE_2D_THRE: 0.3
         CONFIDENCE_3D_THRE: -1.0
         OUTPUT_CONFIDENCE: '2D'
 
