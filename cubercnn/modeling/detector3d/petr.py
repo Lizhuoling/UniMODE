@@ -148,7 +148,7 @@ def backbone_cfgs(backbone_name):
             frozen_stages=-1,
             input_ch=3,
             out_features=('stage4','stage5',),
-            pretrained = 'MODEL/fcos3d_vovnet_imgbackbone-remapped.pth',
+            pretrained = 'MODEL/fcos3d_vovnet_imgbackbone_omni3d.pth',
         ),
     )
 

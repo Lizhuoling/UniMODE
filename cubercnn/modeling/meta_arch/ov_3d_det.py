@@ -173,7 +173,7 @@ class OV_3D_Det(nn.Module):
 
     def forward_inference(self, detector_out, batched_inputs, ori_img_resolution, conf_thre = 0.01):
         inference_results = self.detector.inference(detector_out, batched_inputs, ori_img_resolution)
-
+        pdb.set_trace()
         return inference_results
 
     def extract_cls_emb(self, cls_idxs, positive_map_label_to_token):
