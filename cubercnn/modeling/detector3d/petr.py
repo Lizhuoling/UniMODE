@@ -8,6 +8,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import torch.distributed as dist
+import torchvision
 
 from pytorch3d.transforms import rotation_6d_to_matrix
 from pytorch3d.transforms.so3 import so3_relative_angle
@@ -340,7 +341,7 @@ class PETR_HEAD(nn.Module):
 
         # Loss functions
         #self.cls_loss = nn.BCEWithLogitsLoss(reduction = 'none')
-        self.cls_loss = build_loss({'type': 'FocalLoss', 'use_sigmoid': True, 'gamma': 2.0, 'alpha': 0.25, 'loss_weight': 1.0})
+        #self.cls_loss = build_loss({'type': 'FocalLoss', 'use_sigmoid': True, 'gamma': 2.0, 'alpha': 0.25, 'loss_weight': 1.0})
         #self.reg_loss = build_loss({'type': 'L1Loss', 'loss_weight': 1.0})
         self.reg_loss = nn.L1Loss(reduction = 'none')
         self.iou_loss = build_loss({'type': 'GIoULoss', 'loss_weight': 0.0})
@@ -578,7 +579,8 @@ class PETR_HEAD(nn.Module):
         
         assign_results = self.get_matching(cls_scores_list, bbox_preds_list, batched_inputs, ori_img_resolution)
 
-        loss_dict = {'cls_loss_{}'.format(dec_idx): 0, 'loc_loss_{}'.format(dec_idx): 0, 'dim_loss_{}'.format(dec_idx): 0, 'pose_loss_{}'.format(dec_idx): 0}
+        loss_dict = {'cls_loss_{}'.format(dec_idx): 0, 'loc_loss_{}'.format(dec_idx): 0, 'dim_loss_{}'.format(dec_idx): 0, 'pose_loss_{}'.format(dec_idx): 0, 'det2d_reg_loss_{}'.format(dec_idx): 0, 'det2d_iou_loss_{}'.format(dec_idx): 0}
+
         num_pos = 0
         for bs, (pred_idxs, gt_idxs) in enumerate(assign_results):
             bs_cls_scores = cls_scores_list[bs] # Left shape: (num_all_query, cls_num)
@@ -602,9 +604,10 @@ class PETR_HEAD(nn.Module):
             bs_det2d_gts = bs_det2d_gts / img_scale[None]   # Left shape: (num_gt, 4)
             
             # Classification loss
-            bs_valid_cls_gts = bs_cls_gts.new_ones((self.num_query,)) * self.total_cls_num  # Left shape: (num_query,). All labels are set to background.
-            bs_valid_cls_gts[pred_idxs] = bs_cls_gts
-            loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * self.cls_loss(bs_cls_scores, bs_valid_cls_gts, bs_cls_scores.new_ones(self.num_query,), avg_factor=1)
+            bs_cls_gts_onehot = bs_cls_gts.new_zeros((self.num_query, self.total_cls_num))   # Left shape: (num_query, num_cls)
+            bs_valid_cls_gts_onehot = F.one_hot(bs_cls_gts, num_classes = self.total_cls_num) # Left shape: (num_gt, num_cls)
+            bs_cls_gts_onehot[pred_idxs] = bs_valid_cls_gts_onehot
+            loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * torchvision.ops.sigmoid_focal_loss(bs_cls_scores, bs_cls_gts_onehot.float(), reduction = 'none').sum()
             
             # Localization loss
             loss_dict['loc_loss_{}'.format(dec_idx)] += self.reg_weight * (math.sqrt(2) * self.reg_loss(bs_loc_preds, bs_loc_gts)\
@@ -617,10 +620,10 @@ class PETR_HEAD(nn.Module):
             loss_dict['pose_loss_{}'.format(dec_idx)] += self.reg_weight * (1 - so3_relative_angle(bs_pose_preds, bs_pose_gts, eps=0.1, cos_angle=True)).sum()
             
             # 2D det reg loss
-            loss_dict['det2d_reg_loss_{}'.format(dec_idx)] = self.det2d_l1_weight * self.reg_loss(bs_det2d_xywh_preds, bs_det2d_gts).sum()
+            loss_dict['det2d_reg_loss_{}'.format(dec_idx)] += self.det2d_l1_weight * self.reg_loss(bs_det2d_xywh_preds, bs_det2d_gts).sum()
 
             # 2D det iou loss
-            loss_dict['det2d_iou_loss_{}'.format(dec_idx)] = self.det2d_iou_weight * (1 - torch.diag(generalized_box_iou(box_cxcywh_to_xyxy(bs_det2d_xywh_preds), box_cxcywh_to_xyxy(bs_det2d_gts)))).sum()
+            loss_dict['det2d_iou_loss_{}'.format(dec_idx)] += self.det2d_iou_weight * (1 - torch.diag(generalized_box_iou(box_cxcywh_to_xyxy(bs_det2d_xywh_preds), box_cxcywh_to_xyxy(bs_det2d_gts)))).sum()
 
             num_pos += gt_idxs.shape[0]
         

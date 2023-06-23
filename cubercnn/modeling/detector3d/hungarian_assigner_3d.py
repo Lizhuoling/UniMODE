@@ -13,6 +13,7 @@ import numpy  as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 
 #from mmdet.models.task_modules.assigners import AssignResult, BaseAssigner
 #from mmdet.models.task_modules import BBOX_ASSIGNERS, build_match_cost
@@ -63,8 +64,7 @@ class HungarianAssigner3D(BaseAssigner):
         self.det2d_iou_weight = det2d_iou_weight
         self.total_cls_num = total_cls_num
         self.uncern_range = uncern_range
-        #self.cls_loss = nn.BCEWithLogitsLoss(reduction = 'none')
-        self.cls_loss = build_match_cost({'type': 'FocalLossCost', 'weight': 1.0})
+        #self.cls_loss = build_match_cost({'type': 'FocalLossCost', 'weight': 1.0})
         #self.reg_cost = build_match_cost({'type': 'BBox3DL1Cost', 'weight': 1.0})
         self.reg_loss = nn.L1Loss(reduction = 'none')
         self.iou_cost = build_match_cost({'type': 'IoUCost', 'weight': 1.0})
@@ -101,7 +101,9 @@ class HungarianAssigner3D(BaseAssigner):
             indices.append([[], []])
             return [(torch.as_tensor(i, dtype = torch.int64), torch.as_tensor(j, dtype = torch.int64)) for i, j in indices]
 
-        cls_cost = self.cls_weight * self.cls_loss(cls_scores, cls_gts) # Left shape: (num_query, num_gt)
+        expand_cls_scores = cls_scores.unsqueeze(1).expand(-1, num_gts, -1)    # Left shape: (num_query, num_gt, num_cls)
+        expand_cls_gts = F.one_hot(cls_gts, num_classes = self.total_cls_num)[None].expand(num_preds, -1, -1)   # Left shape: (num_query, num_gt, num_cls)
+        cls_cost = self.cls_weight * torchvision.ops.sigmoid_focal_loss(expand_cls_scores, expand_cls_gts.float(), reduction = 'none').sum(-1)
         
         loc_preds = loc_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 3)
         uncern_preds = uncern_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 1)
@@ -124,6 +126,7 @@ class HungarianAssigner3D(BaseAssigner):
         )   # Left shape: (num_query, num_gt)
 
         cost = cls_cost + loc_cost + dim_cost + cost_pose + det2d_reg_loss + det2d_iou_loss # Left shape: (num_query, num_gt)
+
         indices.append(linear_sum_assignment(cost.cpu().numpy()))
         
         return [(torch.as_tensor(i, dtype = torch.int64), torch.as_tensor(j, dtype = torch.int64)) for i, j in indices]

@@ -2,7 +2,7 @@ _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
   TRAIN: ('KITTI_train',)
-  TEST: ('KITTI_val',) 
+  TEST: ('KITTI_train',) 
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 SOLVER:
