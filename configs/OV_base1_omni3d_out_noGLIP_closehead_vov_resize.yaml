@@ -1,20 +1,17 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('nuScenes_val',)
-  TEST: ('nuScenes_val',) 
+  TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
+  TEST: ('nuScenes_test', 'KITTI_test') 
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
-  #TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'Objectron_train', 'Objectron_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
-  #TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test') 
-  #CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
 
 INPUT:
-  MIN_SIZE_TRAIN: (512,)
+  MIN_SIZE_TRAIN: (256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512, 528, 544, 560, 576, 592, 608, 624, 640,)
   MIN_SIZE_TEST: 512
   RANDOM_FLIP: "none"
 
 SOLVER:
-  IMS_PER_BATCH: 8
+  IMS_PER_BATCH: 32
   TYPE: "adamw"
   BASE_LR: 2e-4
   MAX_ITER: 116000
@@ -134,8 +131,8 @@ MODEL:
       SEPARATION_TOKENS: ". "
 
     INPUT:
-      PIXEL_MEAN: [ 103.530, 116.280, 123.675 ]
-      PIXEL_STD: [ 57.375, 57.120, 58.395 ]
+      PIXEL_MEAN: [123.675, 116.280, 103.530] # vovnet
+      PIXEL_STD: [58.395, 57.120, 57.375] # vovnet
       MIN_SIZE_TRAIN: 800
       MAX_SIZE_TRAIN: 1333
       MIN_SIZE_TEST: 800
