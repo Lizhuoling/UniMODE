@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
+import pdb
 import torch
 import numpy as np
 from detectron2.structures import BoxMode, Keypoints
@@ -119,7 +120,7 @@ def transform_instance_annotations(annotation, transforms, *, K):
 
         # manually apply mirror for pose
         for transform in transforms:
-
+            
             # horrizontal flip?
             if isinstance(transform, T.HFlipTransform):
 

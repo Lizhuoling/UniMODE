@@ -61,7 +61,7 @@ class OV_3D_Det(nn.Module):
         ### Build the 3D Det model ###
         self.detector = build_3d_detector(cfg)
 
-        #self.max_range = [9999, -9999, 9999, -9999, 9999, -9999]
+        #self.max_range = [9999, -9999, 9999, -9999, 9999, -9999]    # For debug
 
     def forward_once(self):
         if not self.forward_once_flag:
@@ -143,8 +143,8 @@ class OV_3D_Det(nn.Module):
         # 3D Det
         detector_out = self.detector(images, batched_inputs, glip_results, self.class_name_emb)
 
-        '''# For survey the data statistics.
-        for batch in batched_inputs:
+        # For survey the data statistics. For debug
+        '''for batch in batched_inputs:
             xyz = batch['instances'].gt_boxes3D[:, 6:9] # 9 numbers in gt_boxes3D: projected 2D center, depth, w, h, l, 3D center
             if xyz[:, 0].min() < self.max_range[0]:
                 self.max_range[0] = xyz[:, 0].min()
@@ -158,7 +158,8 @@ class OV_3D_Det(nn.Module):
                 self.max_range[4] = xyz[:, 2].min()
             if xyz[:, 2].max() > self.max_range[5]:
                 self.max_range[5] = xyz[:, 2].max()
-            print('max_range:', self.max_range)'''
+            print('max_range:', self.max_range)
+        return'''
         
         ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)
         

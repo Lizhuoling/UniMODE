@@ -2,6 +2,7 @@
 import json
 import time
 import os
+import pdb
 import contextlib
 import io
 import logging
@@ -322,7 +323,6 @@ def register_and_store_model_metadata(datasets, output_dir, filter_settings=None
             'thing_classes': thing_classes,
             'thing_dataset_id_to_contiguous_id': id_map,
         })
-
     MetadataCatalog.get('omni3d_model').thing_classes = thing_classes
     MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id  = id_map
 
