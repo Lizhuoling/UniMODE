@@ -1,8 +1,8 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
-  TEST: ('nuScenes_test', 'KITTI_test') 
+  TRAIN: ('KITTI_val',)
+  TEST: ('nuScenes_test',) 
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
@@ -11,7 +11,7 @@ INPUT:
   RANDOM_FLIP: "none"
 
 SOLVER:
-  IMS_PER_BATCH: 32
+  IMS_PER_BATCH: 2
   TYPE: "adamw"
   BASE_LR: 2e-4
   MAX_ITER: 116000

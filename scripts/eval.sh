@@ -1,4 +1,4 @@
-exp_id=OV_base1_omni3d_out_noGLIP_closehead_vov_debug
+exp_id=OV_base1_omni3d_out_noGLIP_closehead_vov
 
 CUDA_VISIBLE_DEVICES=3 python tools/train_net.py \
   --eval-only \

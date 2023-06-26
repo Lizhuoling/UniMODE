@@ -519,10 +519,7 @@ class PETR_HEAD(nn.Module):
             # Predicted classes
             bs_pred_classes = bs_max_cls_idxs.clone()
             # Predicted 3D boxes
-            bs_pred_3D_center = bs_bbox_preds[..., self.reg_key_manager('loc')].sigmoid() # Left shape: (valid_query_num, 3)
-            bs_pred_3D_center[..., 0] = bs_pred_3D_center[..., 0] * (self.position_range[1] - self.position_range[0]) + self.position_range[0]
-            bs_pred_3D_center[..., 1] = bs_pred_3D_center[..., 1] * (self.position_range[3] - self.position_range[2]) + self.position_range[2]
-            bs_pred_3D_center[..., 2] = bs_pred_3D_center[..., 2] * (self.position_range[5] - self.position_range[4]) + self.position_range[4]
+            bs_pred_3D_center = bs_bbox_preds[..., self.reg_key_manager('loc')] # Left shape: (valid_query_num, 3)
             bs_pred_dims = bs_bbox_preds[..., self.reg_key_manager('dim')].exp()  # Left shape: (valid_query_num, 3)
             bs_pred_pose = bs_bbox_preds[..., self.reg_key_manager('pose')]   # Left shape: (valid_query_num, 6)
             bs_pred_pose = rotation_6d_to_matrix(bs_pred_pose.view(-1, 6)).view(-1, 3, 3)  # Left shape: (valid_query_num, 3, 3)
@@ -542,13 +539,28 @@ class PETR_HEAD(nn.Module):
             else:
                 corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_pred_3D_center, bs_pred_dims), dim = 1), R = bs_pred_pose)
                 corners_2d = corners_2d[:, :, :2]
-                box2d = torch.cat((corners_2d.min(dim = 1)[0], corners_2d.max(dim = 1)[0]), dim = -1)   # Left shape: (valid_query_num, 4). Predicted 2D box in the augmentation image resolution.
+                bs_pred_2ddet = torch.cat((corners_2d.min(dim = 1)[0], corners_2d.max(dim = 1)[0]), dim = -1)   # Left shape: (valid_query_num, 4). Predicted 2D box in the original image resolution.
+
+                # For debug
+                '''from cubercnn.vis.vis import draw_3d_box
+                img = batched_inputs[0]['image'].permute(1, 2, 0).numpy()
+                img = np.ascontiguousarray(img)
                 img_reso = torch.cat((ori_img_resolution[bs], ori_img_resolution[bs]), dim = 0)
                 initial_w, initial_h = batched_inputs[bs]['width'], batched_inputs[bs]['height']
                 initial_reso = torch.Tensor([initial_w, initial_h, initial_w, initial_h]).to(img_reso.device)
-                resize_scale = initial_reso / img_reso
-                bs_pred_2ddet = box2d * resize_scale[None]
-                
+                Ks[0, :] = Ks[0, :] * ori_img_resolution[bs][0] / initial_w
+                Ks[1, :] = Ks[1, :] * ori_img_resolution[bs][1] / initial_h
+                corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_pred_3D_center, bs_pred_dims), dim = 1), R = bs_pred_pose)
+                corners_2d = corners_2d[:, :, :2].detach()
+                box2d = torch.cat((corners_2d.min(dim = 1)[0], corners_2d.max(dim = 1)[0]), dim = -1)
+                for box in box2d:
+                    box = box.detach().cpu().numpy().astype(np.int32)
+                    cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 2)
+                for idx in range(bs_pred_3D_center.shape[0]):
+                    draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_pred_3D_center[idx].detach().cpu(), bs_pred_dims[idx].detach().cpu()), dim = 0).numpy(), bs_pred_pose[idx].detach().cpu().numpy())
+                cv2.imwrite('vis.png', img)
+                pdb.set_trace()'''
+
             # Obtain the projected 3D center on the original image resolution without augmentation
             proj_centers_3d = (Ks @ bs_pred_3D_center.unsqueeze(-1)).squeeze(-1)    # Left shape: (valid_query_num, 3)
             proj_centers_3d = proj_centers_3d[:, :2] / proj_centers_3d[:, 2:3]  # Left shape: (valid_query_num, 2)
@@ -623,6 +635,27 @@ class PETR_HEAD(nn.Module):
                 bs_det2d_gts = bs_gt_instance.get('gt_boxes').to(device)[gt_idxs].tensor # Left shape: (num_gt, 4)
                 img_scale = torch.cat((ori_img_resolution, ori_img_resolution), dim = 0)    # Left shape: (4,)
                 bs_det2d_gts = bs_det2d_gts / img_scale[None]   # Left shape: (num_gt, 4)
+
+            # For debug
+            '''from cubercnn.vis.vis import draw_3d_box
+            img = batched_inputs[bs]['image'].permute(1, 2, 0).numpy()
+            img = np.ascontiguousarray(img)
+            img_reso = torch.cat((ori_img_resolution[bs], ori_img_resolution[bs]), dim = 0)
+            initial_w, initial_h = batched_inputs[bs]['width'], batched_inputs[bs]['height']
+            initial_reso = torch.Tensor([initial_w, initial_h, initial_w, initial_h]).to(img_reso.device)
+            Ks = torch.Tensor(np.array(batched_inputs[bs]['K'])).cuda()
+            Ks[0, :] = Ks[0, :] * ori_img_resolution[bs][0] / initial_w
+            Ks[1, :] = Ks[1, :] * ori_img_resolution[bs][1] / initial_h
+            corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_preds, bs_dim_preds.exp()), dim = 1), R = bs_pose_gts)
+            corners_2d = corners_2d[:, :, :2].detach()
+            box2d = torch.cat((corners_2d.min(dim = 1)[0], corners_2d.max(dim = 1)[0]), dim = -1)
+            for box in box2d:
+                box = box.detach().cpu().numpy().astype(np.int32)
+                cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 2)
+            for idx in range(bs_loc_preds.shape[0]):
+                draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_preds[idx].detach().cpu(), bs_dim_preds[idx].exp().detach().cpu()), dim = 0).numpy(), bs_pose_preds[idx].detach().cpu().numpy())
+            cv2.imwrite('vis.png', img)
+            pdb.set_trace()'''
             
             # Classification loss
             bs_cls_gts_onehot = bs_cls_gts.new_zeros((self.num_query, self.total_cls_num))   # Left shape: (num_query, num_cls)
@@ -646,7 +679,7 @@ class PETR_HEAD(nn.Module):
 
                 # 2D det iou loss
                 loss_dict['det2d_iou_loss_{}'.format(dec_idx)] += self.det2d_iou_weight * (1 - torch.diag(generalized_box_iou(box_cxcywh_to_xyxy(bs_det2d_xywh_preds), box_cxcywh_to_xyxy(bs_det2d_gts)))).sum()
-
+            
             num_pos += gt_idxs.shape[0]
         
         num_pos = torch_dist.reduce_mean(torch.Tensor([num_pos]).cuda()).item()
