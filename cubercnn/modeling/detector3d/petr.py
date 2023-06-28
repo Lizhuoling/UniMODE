@@ -37,6 +37,7 @@ class DETECTOR_PETR(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
+        self.fp16_enabled = cfg.MODEL.DETECTOR3D.PETR.BACKBONE_FP16
 
         self.img_mean = torch.Tensor(self.cfg.MODEL.PIXEL_MEAN)  # (b, g, r)
         self.img_std = torch.Tensor(self.cfg.MODEL.PIXEL_STD)
@@ -55,7 +56,7 @@ class DETECTOR_PETR(nn.Module):
 
         self.petr_head = PETR_HEAD(cfg, in_channels = neck_cfg['out_channels'])
 
-    @auto_fp16(apply_to=('img'), out_fp32=True)
+    @auto_fp16(apply_to=('imgs'), out_fp32=True)
     def extract_feat(self, imgs, batched_inputs):
         if self.grid_mask and self.training:   
             imgs = self.grid_mask(imgs)
@@ -189,7 +190,8 @@ def transformer_cfgs(transformer_name):
                             num_heads=8,
                             dropout=0.1),
                         dict(
-                            type='PETRMultiheadAttention',
+                            type='PETRMultiheadFlashAttention',
+                            #type='PETRMultiheadAttention',
                             embed_dims=256,
                             num_heads=8,
                             dropout=0.1),

@@ -81,7 +81,8 @@ class OV_3D_Det(nn.Module):
                 self.class_name_emb = []
                 all_positive_map_label_to_token = self.all_positive_map_label_to_token[0]
                 for key, value in all_positive_map_label_to_token.items():
-                    self.class_name_emb.append(class_name_token_emb[value])
+                    cls_token_emb = class_name_token_emb[value].mean(dim = 0, keepdim = True)
+                    self.class_name_emb.append(cls_token_emb)
                 self.class_name_emb = torch.cat(self.class_name_emb, dim = 0)
             
             self.forward_once_flag = True

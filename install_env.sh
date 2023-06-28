@@ -34,6 +34,12 @@ rm -rf build
 pip install -e .
 cd ..
 
+git clone https://github.com/HazyResearch/flash-attention.git
+cd flash-attention
+rm -rf build
+python setup.py develop
+cd ..
+
 rm -rf build
 python setup_maskrcnn_benchmark.py develop
 
