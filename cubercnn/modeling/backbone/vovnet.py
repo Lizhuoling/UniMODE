@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------
-# Copyright (c) 2021 megvii-model. All Rights Reserved.
+# Copyright (c) 2022 megvii-model. All Rights Reserved.
 # ------------------------------------------------------------------------
 # Modified from DETR3D (https://github.com/WangYueFt/detr3d)
 # Copyright (c) 2021 Wang, Yue
@@ -7,8 +7,6 @@
 # Copyright (c) Youngwan Lee (ETRI) All Rights Reserved.
 # Copyright 2021 Toyota Research Institute.  All rights reserved.
 # ------------------------------------------------------------------------
-import warnings
-import pdb
 from collections import OrderedDict
 from mmcv.runner import BaseModule
 from mmdet.models.builder import BACKBONES
@@ -16,7 +14,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.batchnorm import _BatchNorm
-
+import warnings
+import torch.utils.checkpoint as cp
 
 VoVNet19_slim_dw_eSE = {
     'stem': [64, 64, 64],
@@ -189,7 +188,7 @@ class eSEModule(nn.Module):
 
 class _OSA_module(nn.Module):
     def __init__(
-        self, in_ch, stage_ch, concat_ch, layer_per_block, module_name, SE=False, identity=False, depthwise=False
+        self, in_ch, stage_ch, concat_ch, layer_per_block, module_name, SE=False, identity=False, depthwise=False, with_cp=True
     ):
 
         super(_OSA_module, self).__init__()
@@ -197,6 +196,7 @@ class _OSA_module(nn.Module):
         self.identity = identity
         self.depthwise = depthwise
         self.isReduced = False
+        self.use_checkpoint = with_cp
         self.layers = nn.ModuleList()
         in_channel = in_ch
         if self.depthwise and in_channel != stage_ch:
@@ -217,7 +217,7 @@ class _OSA_module(nn.Module):
 
         self.ese = eSEModule(concat_ch)
 
-    def forward(self, x):
+    def _forward(self, x):
 
         identity_feat = x
 
@@ -236,6 +236,15 @@ class _OSA_module(nn.Module):
 
         if self.identity:
             xt = xt + identity_feat
+
+        return xt
+
+    def forward(self, x):
+
+        if self.use_checkpoint and self.training:
+            xt = cp.checkpoint(self._forward, x)
+        else:
+            xt = self._forward(x)
 
         return xt
 
@@ -276,7 +285,7 @@ class _OSA_stage(nn.Sequential):
 
 
 @BACKBONES.register_module()
-class VoVNet(BaseModule):
+class VoVNetCP(BaseModule):
     def __init__(self, spec_name, input_ch=3, out_features=None, 
                  frozen_stages=-1, norm_eval=True, pretrained=None, init_cfg=None):
         """
@@ -285,7 +294,7 @@ class VoVNet(BaseModule):
             out_features (list[str]): name of the layers whose outputs should
                 be returned in forward. Can be anything in "stem", "stage2" ...
         """
-        super(VoVNet, self).__init__(init_cfg)
+        super(VoVNetCP, self).__init__(init_cfg)
         self.frozen_stages = frozen_stages
         self.norm_eval = norm_eval
 
@@ -339,7 +348,7 @@ class VoVNet(BaseModule):
             self._out_feature_channels[name] = config_concat_ch[i]
             if not i == 0:
                 self._out_feature_strides[name] = current_stirde = int(current_stirde * 2)
-        
+
         # initialize weights
         # self._initialize_weights()
 
@@ -348,15 +357,27 @@ class VoVNet(BaseModule):
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight)
 
+    # def forward(self, x):
+    #     outputs = {}
+    #     x = self.stem(x)
+    #     if "stem" in self._out_features:
+    #         outputs["stem"] = x
+    #     for name in self.stage_names:
+    #         x = getattr(self, name)(x)
+    #         if name in self._out_features:
+    #             outputs[name] = x
+
+    #     return outputs
+
     def forward(self, x):
-        outputs = {}
+        outputs = []
         x = self.stem(x)
         if "stem" in self._out_features:
-            outputs["stem"] = x
+            outputs.append(x)
         for name in self.stage_names:
             x = getattr(self, name)(x)
             if name in self._out_features:
-                outputs[name] = x
+                outputs.append(x)
 
         return outputs
 
@@ -376,10 +397,11 @@ class VoVNet(BaseModule):
     def train(self, mode=True):
         """Convert the model into training mode while keep normalization layer
         freezed."""
-        super(VoVNet, self).train(mode)
+        super(VoVNetCP, self).train(mode)
         self._freeze_stages()
         if mode and self.norm_eval:
             for m in self.modules():
                 # trick: eval have effect on BatchNorm only
                 if isinstance(m, _BatchNorm):
                     m.eval()
+

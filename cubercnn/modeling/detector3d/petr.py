@@ -110,7 +110,7 @@ class DETECTOR_PETR(nn.Module):
         width_im_scales_ratios = np.array([im.shape[2] / info['width'] for (info, im) in zip(batched_inputs, images)])
         scale_ratios = torch.Tensor(np.stack((width_im_scales_ratios, height_im_scales_ratios), axis = 1)).cuda()   # Left shape: (B, 2)
         Ks = copy.deepcopy(np.array([ele['K'] for ele in batched_inputs])) # Left shape: (B, 3, 3)
-
+        
         for idx, batch_input in enumerate(batched_inputs):
             if 'horizontal_flip_flag' in batch_input.keys() and batch_input['horizontal_flip_flag']:
                 Ks[idx][0][0] = -Ks[idx][0][0]
@@ -359,6 +359,9 @@ class PETR_HEAD(nn.Module):
         
         self.init_weights()
 
+        if cfg.MODEL.DETECTOR3D.PETR.HEAD.QUERY_MLN:
+            self.query_mln = MLN(4, self.embed_dims)
+
     def init_weights(self):
         if self.cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'PETR_TRANSFORMER':
             self.transformer.init_weights()
@@ -452,6 +455,11 @@ class PETR_HEAD(nn.Module):
             random_query_embeds = self.query_embedding(pos2posemb3d(random_reference_points))
             random_query_embeds = random_query_embeds + self.unknown_cls_emb.weight # Left shape: (num_random_box, L) 
             query_embeds = torch.cat((query_embeds, random_query_embeds.unsqueeze(0).expand(B, -1, -1)), dim = 1)   # Left shape: (B, num_query, L)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.QUERY_MLN:
+            Ks_embs = torch.stack((Ks[:, 0, 0], Ks[:, 0, 2], Ks[:, 1, 1], Ks[:, 1, 2]), dim = -1).unsqueeze(1).expand(-1, query_embeds.shape[1], -1)    # Left shape: (B, num_query, 4)
+            Ks_embs = Ks_embs / 1000
+            query_embeds = self.query_mln(query_embeds, Ks_embs)    # Left shape: (B, num_query, L)
         
         outs_dec, _ = self.transformer(feat, masks, query_embeds, pos_embed, self.reg_branches, batched_inputs) # Left shape: (num_layers, bs, num_query, dim)
         outs_dec = torch.nan_to_num(outs_dec)
@@ -728,3 +736,39 @@ def pos2posemb3d(pos, num_pos_feats=128, temperature=10000):
     pos_z = torch.stack((pos_z[..., 0::2].sin(), pos_z[..., 1::2].cos()), dim=-1).flatten(-2)
     posemb = torch.cat((pos_y, pos_x, pos_z), dim=-1)
     return posemb
+
+class MLN(nn.Module):
+    ''' 
+    Args:
+        c_dim (int): dimension of latent code c
+        f_dim (int): feature dimension
+    '''
+
+    def __init__(self, c_dim, f_dim=256):
+        super().__init__()
+        self.c_dim = c_dim
+        self.f_dim = f_dim
+
+        self.reduce = nn.Sequential(
+            nn.Linear(c_dim, f_dim),
+            nn.ReLU(),
+        )
+        self.gamma = nn.Linear(f_dim, f_dim)
+        self.beta = nn.Linear(f_dim, f_dim)
+        self.ln = nn.LayerNorm(f_dim, elementwise_affine=False)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.zeros_(self.gamma.weight)
+        nn.init.zeros_(self.beta.weight)
+        nn.init.ones_(self.gamma.bias)
+        nn.init.zeros_(self.beta.bias)
+
+    def forward(self, x, c):
+        x = self.ln(x)
+        c = self.reduce(c)
+        gamma = self.gamma(c)
+        beta = self.beta(c)
+        out = gamma * x + beta
+
+        return out
