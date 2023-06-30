@@ -6,7 +6,7 @@ DATASETS:
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
-  RESIZE_TGT_SIZE: (1600, 896)
+  RESIZE_TGT_SIZE: (1280, 1024)
   RANDOM_FLIP: "horizontal"
   COLOR_AUG: True
 
