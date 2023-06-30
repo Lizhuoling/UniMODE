@@ -4,6 +4,7 @@ import os
 import sys
 import pdb
 import numpy as np
+import warnings
 import copy
 from collections import OrderedDict
 import torch
@@ -26,6 +27,8 @@ from detectron2.utils.logger import setup_logger
 #torch.autograd.set_detect_anomaly(True)
 os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
 logger = logging.getLogger("cubercnn")
+
+warnings.filterwarnings("ignore")
 
 sys.dont_write_bytecode = True
 sys.path.append(os.getcwd())

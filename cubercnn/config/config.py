@@ -173,6 +173,7 @@ def get_cfg_defaults(cfg):
     cfg.TEST.TRUNCATION_THRES = 1/2.0
 
     cfg.INPUT.RANDOM_FLIP = "horizontal"
+    cfg.INPUT.COLOR_AUG = False
 
     # When True, we will use localization uncertainty
     # as the new IoUness score in the RPN.

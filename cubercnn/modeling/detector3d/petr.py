@@ -67,7 +67,7 @@ class DETECTOR_PETR(nn.Module):
         return neck_feat_list
 
     def forward(self, images, batched_inputs, glip_results, class_name_emb):
-        Ks, scale_ratios = self.scale_intrinsics(images, batched_inputs)    # Rescale the camera intrsincis based on input image resolution change.
+        Ks, scale_ratios = self.transform_intrinsics(images, batched_inputs)    # Transform the camera intrsincis based on input image augmentations.
         masks = self.generate_mask(images)  # Generate image mask for detr. masks shape: (b, h, w)
         pad_img_resolution = (images.tensor.shape[3],images.tensor.shape[2])
         ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # (B, 2), with first then height
@@ -105,11 +105,16 @@ class DETECTOR_PETR(nn.Module):
         inference_results = self.petr_head.inference(detector_out, batched_inputs, ori_img_resolution)
         return inference_results
 
-    def scale_intrinsics(self, images, batched_inputs):
+    def transform_intrinsics(self, images, batched_inputs):
         height_im_scales_ratios = np.array([im.shape[1] / info['height'] for (info, im) in zip(batched_inputs, images)])
         width_im_scales_ratios = np.array([im.shape[2] / info['width'] for (info, im) in zip(batched_inputs, images)])
         scale_ratios = torch.Tensor(np.stack((width_im_scales_ratios, height_im_scales_ratios), axis = 1)).cuda()   # Left shape: (B, 2)
         Ks = copy.deepcopy(np.array([ele['K'] for ele in batched_inputs])) # Left shape: (B, 3, 3)
+
+        for idx, batch_input in enumerate(batched_inputs):
+            if 'horizontal_flip_flag' in batch_input.keys() and batch_input['horizontal_flip_flag']:
+                Ks[idx][0][0] = -Ks[idx][0][0]
+                Ks[idx][0][2] = batch_input['width'] - Ks[idx][0][2]
         
         Ks[:, 0, :] = Ks[:, 0, :] * width_im_scales_ratios[:, None] # Rescale intrinsics to the input image resolution.
         Ks[:, 1, :] = Ks[:, 1, :] * height_im_scales_ratios[:, None]
