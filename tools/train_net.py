@@ -236,7 +236,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
 
                         if param.grad is not None:
                             diverging_model = torch.isnan(param.grad).any() or torch.isinf(param.grad).any()
-                        
+                            
                         if diverging_model:
                             logger.warning('Skipping gradient update due to inf/nan detection, loss is {}'.format(loss_dict_reduced))
                             break

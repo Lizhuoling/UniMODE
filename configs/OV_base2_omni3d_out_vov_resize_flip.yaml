@@ -6,7 +6,7 @@ DATASETS:
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
-  RESIZE_TGT_SIZE: (1600, 900)
+  RESIZE_TGT_SIZE: (1600, 896)
   RANDOM_FLIP: "horizontal"
   COLOR_AUG: True
 
@@ -20,6 +20,11 @@ SOLVER:
   WARMUP_FACTOR: 0.3333
   WARMUP_ITERS: 500
   WARMUP_METHOD: "linear"
+
+  CLIP_GRADIENTS: 
+    ENABLED: True
+    CLIP_VALUE: 35.0
+    NORM_TYPE: 2.0
 
 TEST:
   EVAL_PERIOD: 23200 #116000
