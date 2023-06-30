@@ -174,6 +174,7 @@ def get_cfg_defaults(cfg):
 
     cfg.INPUT.RANDOM_FLIP = "horizontal"
     cfg.INPUT.COLOR_AUG = False
+    cfg.INPUT.RESIZE_TGT_SIZE = (-1,)
 
     # When True, we will use localization uncertainty
     # as the new IoUness score in the RPN.

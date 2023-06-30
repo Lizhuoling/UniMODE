@@ -1,6 +1,6 @@
-exp_id=OV_base2_omni3d_out_vov
+exp_id=OV_base2_omni3d_out_vov_resize_flip
 
-CUDA_VISIBLE_DEVICES=0,1 python tools/train_net.py \
+CUDA_VISIBLE_DEVICES=2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
   --num-gpus 2 \
   OUTPUT_DIR output/$exp_id \

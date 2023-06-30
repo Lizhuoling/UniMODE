@@ -224,7 +224,6 @@ def _test_loader_from_config(cfg, dataset_name, mapper=None):
 
 @configurable(from_config=_test_loader_from_config)
 def build_detection_test_loader(dataset, *, mapper, sampler=None, num_workers=0):
-    
     if isinstance(dataset, list):
         dataset = DatasetFromList(dataset, copy=False)
     if mapper is not None:

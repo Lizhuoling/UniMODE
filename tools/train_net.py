@@ -89,7 +89,8 @@ def do_test(cfg, model, iteration='final', storage=None):
         '''
         Distributed Cube R-CNN inference
         '''
-        data_loader = build_detection_test_loader(cfg, dataset_name)
+        data_mapper = DatasetMapper3D(cfg, is_train=False)
+        data_loader = build_detection_test_loader(cfg, dataset_name, mapper = data_mapper, num_workers = 4) 
         results_json = inference_on_dataset(model, data_loader)
         
         if comm.is_main_process():

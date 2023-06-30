@@ -79,13 +79,13 @@ class DatasetMapper3D(DatasetMapper):
 
     @classmethod
     def from_config(cls, cfg, is_train: bool = True):
-        augs = detection_utils.build_augmentation(cfg, is_train)
+        augs = build_augmentation(cfg, is_train)
         if cfg.INPUT.CROP.ENABLED and is_train:
             augs.insert(0, T.RandomCrop(cfg.INPUT.CROP.TYPE, cfg.INPUT.CROP.SIZE))
             recompute_boxes = cfg.MODEL.MASK_ON
         else:
             recompute_boxes = False
-
+        
         ret = {
             "is_train": is_train,
             "augmentations": augs,
@@ -154,6 +154,37 @@ class DatasetMapper3D(DatasetMapper):
                 dataset_dict["horizontal_flip_flag"] = True
 
         return dataset_dict
+
+def build_augmentation(cfg, is_train):
+    """
+    Create a list of default :class:`Augmentation` from config.
+    Now it includes resizing and flipping.
+
+    Returns:
+        list[Augmentation]
+    """
+    if len(cfg.INPUT.RESIZE_TGT_SIZE) == 2:
+        resize_w, resize_h = cfg.INPUT.RESIZE_TGT_SIZE 
+        augmentation = [T.Resize((resize_h, resize_w))]
+    else:
+        if is_train:
+            min_size = cfg.INPUT.MIN_SIZE_TRAIN
+            max_size = cfg.INPUT.MAX_SIZE_TRAIN
+            sample_style = cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING
+        else:
+            min_size = cfg.INPUT.MIN_SIZE_TEST
+            max_size = cfg.INPUT.MAX_SIZE_TEST
+            sample_style = "choice"
+        augmentation = [T.ResizeShortestEdge(min_size, max_size, sample_style)]
+
+    if is_train and cfg.INPUT.RANDOM_FLIP != "none":
+        augmentation.append(
+            T.RandomFlip(
+                horizontal=cfg.INPUT.RANDOM_FLIP == "horizontal",
+                vertical=cfg.INPUT.RANDOM_FLIP == "vertical",
+            )
+        )
+    return augmentation
 
 '''
 Cached for mirroring annotations
