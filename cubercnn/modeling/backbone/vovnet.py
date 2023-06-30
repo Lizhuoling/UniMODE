@@ -285,7 +285,7 @@ class _OSA_stage(nn.Sequential):
 
 
 @BACKBONES.register_module()
-class VoVNetCP(BaseModule):
+class VoVNet(BaseModule):
     def __init__(self, spec_name, input_ch=3, out_features=None, 
                  frozen_stages=-1, norm_eval=True, pretrained=None, init_cfg=None):
         """
@@ -294,7 +294,7 @@ class VoVNetCP(BaseModule):
             out_features (list[str]): name of the layers whose outputs should
                 be returned in forward. Can be anything in "stem", "stage2" ...
         """
-        super(VoVNetCP, self).__init__(init_cfg)
+        super(VoVNet, self).__init__(init_cfg)
         self.frozen_stages = frozen_stages
         self.norm_eval = norm_eval
 
@@ -397,7 +397,7 @@ class VoVNetCP(BaseModule):
     def train(self, mode=True):
         """Convert the model into training mode while keep normalization layer
         freezed."""
-        super(VoVNetCP, self).train(mode)
+        super(VoVNet, self).train(mode)
         self._freeze_stages()
         if mode and self.norm_eval:
             for m in self.modules():
