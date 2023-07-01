@@ -66,12 +66,12 @@ class DETECTOR_PETR(nn.Module):
         neck_feat_list = self.img_neck(backbone_feat_list)
         return neck_feat_list
 
-    def forward(self, images, batched_inputs, glip_results, class_name_emb):
+    def forward(self, images, batched_inputs, glip_results, class_name_emb, glip_text_emb, glip_visual_emb):
         Ks, scale_ratios = self.transform_intrinsics(images, batched_inputs)    # Transform the camera intrsincis based on input image augmentations.
         masks = self.generate_mask(images)  # Generate image mask for detr. masks shape: (b, h, w)
         pad_img_resolution = (images.tensor.shape[3],images.tensor.shape[2])
         ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # (B, 2), with first then height
-
+        
         # Visualize 3D gt centers using intrisics
         '''from cubercnn.vis.vis import draw_3d_box
         batch_id = 0
@@ -93,7 +93,7 @@ class DETECTOR_PETR(nn.Module):
         pdb.set_trace()'''
         
         feat_list = self.extract_feat(imgs = images.tensor, batched_inputs = batched_inputs)
-        petr_outs = self.petr_head(feat_list, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs, pad_img_resolution)
+        petr_outs = self.petr_head(feat_list, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs, pad_img_resolution, glip_text_emb, glip_visual_emb)
         
         return petr_outs
 
@@ -140,7 +140,7 @@ def backbone_cfgs(backbone_name):
             out_indices=(2, 3,),
             frozen_stages=-1,
             norm_cfg=dict(type='BN2d', requires_grad=False),
-            norm_eval=False,    # alert!
+            norm_eval=False,
             style='caffe',
             with_cp=True,
             dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False),
@@ -150,7 +150,7 @@ def backbone_cfgs(backbone_name):
         VoVNet = dict(
             type='VoVNet', ###use checkpoint to save memory
             spec_name='V-99-eSE',
-            norm_eval=True,
+            norm_eval=False,
             frozen_stages=-1,
             input_ch=3,
             out_features=('stage4','stage5',),
@@ -247,6 +247,7 @@ class PETR_HEAD(nn.Module):
         self.LID = cfg.MODEL.DETECTOR3D.PETR.DEPTH_LID
         self.depth_num = 64
         self.embed_dims = 256
+        self.lang_dims = cfg.MODEL.GLIP_MODEL.MODEL.LANGUAGE_BACKBONE.LANG_DIM
         self.position_dim = 3 * self.depth_num
         self.position_range = [-65, 65, -25, 40, 0, 220]  # (x_min, x_max, y_min, y_max, z_min, z_max). x: right, y: down, z: inwards
         self.uncern_range = cfg.MODEL.DETECTOR3D.PETR.HEAD.UNCERN_RANGE
@@ -286,6 +287,7 @@ class PETR_HEAD(nn.Module):
 
         # Transformer
         transformer_cfg = transformer_cfgs(cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME)
+        transformer_cfg['cfg'] = cfg
         if cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'PETR_TRANSFORMER':
             self.transformer = build_transformer(transformer_cfg)
         elif cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DETR_TRANSFORMER':
@@ -362,6 +364,26 @@ class PETR_HEAD(nn.Module):
         if cfg.MODEL.DETECTOR3D.PETR.HEAD.QUERY_MLN:
             self.query_mln = MLN(4, self.embed_dims)
 
+        if cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'vision':
+            self.glip_vision_adapter = nn.Linear(self.embed_dims, self.embed_dims)
+            self.glip_vision_position_encoder = nn.Sequential(
+                nn.Conv2d(self.position_dim, self.embed_dims*4, kernel_size=1, stride=1, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(self.embed_dims*4, self.embed_dims, kernel_size=1, stride=1, padding=0),
+            )
+        elif cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'language':
+            self.glip_text_adapter = nn.Linear(self.lang_dims, self.embed_dims)
+        elif cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'VL':
+            self.glip_vision_adapter = nn.Linear(self.embed_dims, self.embed_dims)
+            self.glip_vision_position_encoder = nn.Sequential(
+                nn.Conv2d(self.position_dim, self.embed_dims*4, kernel_size=1, stride=1, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(self.embed_dims*4, self.embed_dims, kernel_size=1, stride=1, padding=0),
+            )
+            self.glip_text_adapter = nn.Linear(self.lang_dims, self.embed_dims)
+        elif cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION != 'none':
+            raise Exception("Unsupported GLIP feature fusion mode: {}".format(cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION))
+
     def init_weights(self):
         if self.cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'PETR_TRANSFORMER':
             self.transformer.init_weights()
@@ -382,7 +404,7 @@ class PETR_HEAD(nn.Module):
 
         return coords_d
 
-    def position_embeding(self, feat, coords_d, Ks, masks, pad_img_resolution):
+    def position_embeding(self, feat, coords_d, Ks, masks, pad_img_resolution, glip_feat_flag = False):
         eps = 1e-5
         pad_w, pad_h = pad_img_resolution
         B, _, H, W = feat.shape
@@ -405,7 +427,10 @@ class PETR_HEAD(nn.Module):
         invalid_coords_mask = masks | invalid_coords_mask.permute(0, 2, 1)  # Left shape: (B, h, w)
         cam_coords = cam_coords.permute(0, 3, 4, 2, 1).contiguous().view(B, -1, H, W)   # (B, D*3, H, W)
         cam_coords = inverse_sigmoid(cam_coords)
-        coords_position_embeding = self.position_encoder(cam_coords)    # Left shape: (B, C, H, W)
+        if not glip_feat_flag:
+            coords_position_embeding = self.position_encoder(cam_coords)    # Left shape: (B, C, H, W)
+        else:
+            coords_position_embeding = self.glip_vision_position_encoder(cam_coords)
         
         return coords_position_embeding, invalid_coords_mask
 
@@ -428,7 +453,7 @@ class PETR_HEAD(nn.Module):
 
         return glip_bbox_emb
 
-    def forward(self, feat_list, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs, pad_img_resolution):
+    def forward(self, feat_list, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs, pad_img_resolution, glip_text_emb, glip_visual_emb):
         feat = self.input_proj(feat_list[0]) # Left shape: (B, C, feat_h, feat_w)
         B = feat.shape[0]
         
@@ -460,8 +485,25 @@ class PETR_HEAD(nn.Module):
             Ks_embs = torch.stack((Ks[:, 0, 0], Ks[:, 0, 2], Ks[:, 1, 1], Ks[:, 1, 2]), dim = -1).unsqueeze(1).expand(-1, query_embeds.shape[1], -1)    # Left shape: (B, num_query, 4)
             Ks_embs = Ks_embs / 1000
             query_embeds = self.query_mln(query_embeds, Ks_embs)    # Left shape: (B, num_query, L)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'vision':
+            glip_visual_feat =  glip_visual_emb[self.cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL]
+            glip_visual_feat = self.glip_vision_adapter(glip_visual_feat.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)    # Left shape: (B, C, feat_h, feat_w)
+            _, _, glip_vision_h, glip_vision_w = glip_visual_feat.shape
+            glip_pos_embed, _ = self.position_embeding(glip_visual_feat, coords_d, Ks, masks.new_zeros(B, glip_vision_h, glip_vision_w), (glip_vision_w, glip_vision_h), glip_feat_flag = True)
+            glip_text_feat = None
+        elif self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'language':
+            glip_visual_feat, glip_pos_embed = None, None
+            glip_text_feat = self.glip_text_adapter(glip_text_emb)   # Left shape: (B, L, C)
+        elif self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'VL':
+            glip_visual_feat =  glip_visual_emb[self.cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL]
+            glip_visual_feat = self.glip_vision_adapter(glip_visual_feat.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)    # Left shape: (B, C, feat_h, feat_w)
+            _, _, glip_vision_h, glip_vision_w = glip_visual_feat.shape
+            glip_pos_embed, _ = self.position_embeding(glip_visual_feat, coords_d, Ks, masks.new_zeros(B, glip_vision_h, glip_vision_w), (glip_vision_w, glip_vision_h), glip_feat_flag = True)
+            glip_text_feat = self.glip_text_adapter(glip_text_emb)   # Left shape: (B, L, C)
         
-        outs_dec, _ = self.transformer(feat, masks, query_embeds, pos_embed, self.reg_branches, batched_inputs) # Left shape: (num_layers, bs, num_query, dim)
+        outs_dec, _ = self.transformer(feat, masks, query_embeds, pos_embed, self.reg_branches, batched_inputs, \
+            glip_visual_feat = glip_visual_feat, glip_pos_embed = glip_pos_embed, glip_text_feat = glip_text_feat) # Left shape: (num_layers, bs, num_query, dim)
         outs_dec = torch.nan_to_num(outs_dec)
 
         outputs_classes = []

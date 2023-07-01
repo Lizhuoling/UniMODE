@@ -128,7 +128,7 @@ class OV_3D_Det(nn.Module):
                     
                 if self.glip_model.training:
                     self.glip_model.eval()
-                glip_outs = self.glip_model(images.tensor, captions=captions, positive_map=positive_map_label_to_token)
+                glip_outs, glip_text_emb, glip_visual_emb = self.glip_model(images.tensor, captions=captions, positive_map=positive_map_label_to_token)
                 for glip_out in glip_outs:
                     glip_out.extra_fields['cls_emb'] = self.extract_cls_emb(glip_out.extra_fields['labels'], positive_map_label_to_token)
                     #vis_2d_det(boxlist = glip_out, img = batched_inputs[0]['image'].permute(1, 2, 0).numpy(), class_names = self.cfg.DATASETS.CATEGORY_NAMES) 
@@ -142,7 +142,7 @@ class OV_3D_Det(nn.Module):
             glip_results = {}
         
         # 3D Det
-        detector_out = self.detector(images, batched_inputs, glip_results, self.class_name_emb)
+        detector_out = self.detector(images, batched_inputs, glip_results, self.class_name_emb, glip_text_emb, glip_visual_emb)
 
         # For survey the data statistics. For debug
         '''for batch in batched_inputs:

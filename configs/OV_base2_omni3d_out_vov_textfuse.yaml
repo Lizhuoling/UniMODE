@@ -1,17 +1,18 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
-  TEST: ('nuScenes_test', 'KITTI_test') 
+  TRAIN: ('KITTI_val',)
+  TEST: ('KITTI_val',) 
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
-  RESIZE_TGT_SIZE: (1280, 1024)
+  MIN_SIZE_TRAIN: (512,)
+  MIN_SIZE_TEST: 512
   RANDOM_FLIP: "none"
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 64 #32
+  IMS_PER_BATCH: 2 #32
   TYPE: "adamw"
   BASE_LR: 4e-4
   MAX_ITER: 116000
@@ -27,7 +28,7 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 11600 #116000
+  EVAL_PERIOD: 11600
 
 MODEL:
   META_ARCHITECTURE: "OV_3D_Det"
@@ -45,6 +46,10 @@ MODEL:
       MATCHER_NAME: 'HungarianAssigner3D'
       DEPTH_LID: True
       NUM_QUERY: 200
+
+      GLIP_FEAT_FUSION: 'language'  # 'vision' or 'language' or 'VL' or 'none'
+      VISION_FUSION_LEVEL: 4
+      TEXT_FUSION_POSITION: 'after'  # before or after
 
       HEAD:
         OV_CLS_HEAD: True

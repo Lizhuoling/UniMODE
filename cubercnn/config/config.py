@@ -51,6 +51,10 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.DETECTOR3D.PETR.MATCHER_NAME = 'HungarianAssigner3D'
     cfg.MODEL.DETECTOR3D.PETR.DEPTH_LID = True
 
+    cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION = 'none'  # 'vision' or 'language' or 'text' or 'none'
+    cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL = 4
+    cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION = 'after'  # before or after
+
     cfg.MODEL.DETECTOR3D.PETR.HEAD = CN()
     cfg.MODEL.DETECTOR3D.PETR.HEAD.OV_CLS_HEAD = True
     cfg.MODEL.DETECTOR3D.PETR.HEAD.UNCERN_RANGE = [-10, 10]

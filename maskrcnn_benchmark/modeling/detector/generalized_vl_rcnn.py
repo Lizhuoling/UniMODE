@@ -98,7 +98,7 @@ class GeneralizedVLRCNN(nn.Module):
         self.rpn = build_rpn(cfg)
         self.roi_heads = build_roi_heads(cfg)
         self.DEBUG = cfg.MODEL.DEBUG
-
+        
         self.freeze_backbone = cfg.MODEL.BACKBONE.FREEZE
         self.freeze_fpn = cfg.MODEL.FPN.FREEZE
         self.freeze_rpn = cfg.MODEL.RPN.FREEZE
@@ -272,7 +272,7 @@ class GeneralizedVLRCNN(nn.Module):
                 tb.add_field("scores", torch.ones(tb.bbox.shape[0], dtype=torch.bool, device=tb.bbox.device))
                 proposals.append(tb)
             if self.cfg.MODEL.RPN.RETURN_FUSED_FEATURES:
-                _, proposal_losses, fused_visual_features = self.rpn(
+                (_, proposal_losses, fused_visual_features), embedding = self.rpn(
                     images, visual_features, targets, language_dict_features,
                     positive_map, captions, swint_feature_c4)
             elif self.training:
@@ -281,8 +281,9 @@ class GeneralizedVLRCNN(nn.Module):
                     null_loss += 0.0 * param.sum()
                 proposal_losses = {('rpn_null_loss', null_loss)}
         else:
-            proposals, proposal_losses, fused_visual_features = self.rpn(images, visual_features, targets, language_dict_features, positive_map,
+            (proposals, proposal_losses, fused_visual_features), text_emb, visual_emb = self.rpn(images, visual_features, targets, language_dict_features, positive_map,
                                               captions, swint_feature_c4)
+        
         if self.roi_heads:
             if self.cfg.MODEL.ROI_MASK_HEAD.PREDICTOR.startswith("VL"):
                 if self.training:
@@ -315,8 +316,8 @@ class GeneralizedVLRCNN(nn.Module):
             losses.update(detector_losses)
             losses.update(proposal_losses)
             return losses
-
-        return result
+        
+        return result, text_emb, visual_emb
 
     def _forward_language_parallel(self, captions=None, targets=None,
             device=None, positive_map=None):

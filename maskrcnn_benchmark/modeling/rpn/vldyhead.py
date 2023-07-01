@@ -743,6 +743,9 @@ class VLDyHead(torch.nn.Module):
         if self.cfg.MODEL.DYHEAD.FUSE_CONFIG.USE_TOKEN_LOSS:
             t_logits = []
         
+        text_emb = embedding = dyhead_tower["lang"]["hidden"]
+        visual_emb = dyhead_tower["visual"]
+
         if self.cfg.MODEL.DYHEAD.FUSE_CONFIG.USE_FUSED_FEATURES_DOT_PRODUCT:
             embedding = dyhead_tower["lang"]["hidden"]
         
@@ -775,7 +778,7 @@ class VLDyHead(torch.nn.Module):
             # dot_product_proj_tokens = self.dot_product_projection_text(embedding / 28.0)
 
             dot_product_proj_tokens_bias = torch.matmul(embedding, self.bias_lang) + self.bias0
-
+        
         # shallow contrastive (original feature from image & text encoder)
         shallow_img_emb_feats = None
         shallow_text_emb = None
@@ -856,7 +859,7 @@ class VLDyHead(torch.nn.Module):
         if shallow_img_emb_feats is not None and shallow_text_emb is not None:
             # shallow_img_embs = torch.cat(shallow_img_embs, dim=1)
             proj_tokens = shallow_text_emb
-        return logits, bbox_reg, centerness, t_logits, proj_tokens, contrastive_logits, dot_product_logits, mlm_logits, shallow_img_emb_feats, fused_visual_features
+        return logits, bbox_reg, centerness, t_logits, proj_tokens, contrastive_logits, dot_product_logits, mlm_logits, shallow_img_emb_feats, fused_visual_features, text_emb, visual_emb
 
 
 class VLDyHeadModule(torch.nn.Module):
@@ -917,7 +920,7 @@ class VLDyHeadModule(torch.nn.Module):
             language_dict_features['hidden'] = self.tunable_linear.weight[:embedding.size(1), :].unsqueeze(0) + language_dict_features['hidden']
 
         box_cls, box_regression, centerness, token_logits, \
-        proj_tokens, contrastive_logits, dot_product_logits, mlm_logits, shallow_img_emb_feats, fused_visual_features = self.head(features,
+        proj_tokens, contrastive_logits, dot_product_logits, mlm_logits, shallow_img_emb_feats, fused_visual_features, text_emb, visual_emb = self.head(features,
                                                                         language_dict_features,
                                                                         embedding,
                                                                         swint_feature_c4
@@ -937,7 +940,7 @@ class VLDyHeadModule(torch.nn.Module):
                                        mlm_labels = language_dict_features["mlm_labels"],
                                        shallow_img_emb_feats=shallow_img_emb_feats,
                                        fused_visual_features=fused_visual_features
-                                       )
+                                       ), text_emb, visual_emb
         else:
             return self._forward_test(box_regression, centerness, anchors,
                                       box_cls,
@@ -945,7 +948,7 @@ class VLDyHeadModule(torch.nn.Module):
                                       dot_product_logits,
                                       positive_map,
                                       fused_visual_features=fused_visual_features
-                                      )
+                                      ), text_emb, visual_emb
 
     def _forward_train(self, box_cls, box_regression, centerness, targets, anchors,
                        captions=None,

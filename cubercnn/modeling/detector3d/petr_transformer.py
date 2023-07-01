@@ -54,7 +54,7 @@ class PETRTransformer(BaseModule):
             Defaults to None.
     """
 
-    def __init__(self, encoder=None, decoder=None, init_cfg=None, cross=False):
+    def __init__(self, encoder=None, decoder=None, init_cfg=None, cross=False, cfg = None):
         super(PETRTransformer, self).__init__(init_cfg=init_cfg)
         if encoder is not None:
             self.encoder = build_transformer_layer_sequence(encoder)
@@ -64,6 +64,8 @@ class PETRTransformer(BaseModule):
         self.embed_dims = self.decoder.embed_dims
         self.cross = cross
 
+        self.cfg = cfg
+
     def init_weights(self):
         # follow the official DETR to init parameters
         for m in self.modules():
@@ -72,7 +74,7 @@ class PETRTransformer(BaseModule):
         self._is_init = True
 
 
-    def forward(self, x, mask, query_embed, pos_embed, reg_branch=None, batched_inputs = None):
+    def forward(self, x, mask, query_embed, pos_embed, reg_branch=None, batched_inputs = None, glip_visual_feat = None, glip_pos_embed = None, glip_text_feat = None):
         """Forward function for `Transformer`.
         Args:
             x (Tensor): Input query with shape [bs, c, h, w] where
@@ -100,6 +102,18 @@ class PETRTransformer(BaseModule):
         mask = mask.view(bs, -1)  # [bs, h, w] -> [bs, h*w]
         target = torch.zeros_like(query_embed)  # Left shape: (num_query, bs, dim)
 
+        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('vision', 'VL'):
+            _, _, glip_visual_h, glip_visual_w = glip_visual_feat.shape
+            glip_visual_feat = glip_visual_feat.permute(2, 3, 0, 1).reshape(-1, bs, c)
+            glip_pos_embed = glip_pos_embed.permute(2, 3, 0, 1).reshape(-1, bs, c)
+            glip_visual_mask = mask.new_zeros((bs, glip_visual_h * glip_visual_w))
+            memory = torch.cat((memory, glip_visual_feat), dim  = 0)    # Left shape: (L, B, C)
+            pos_embed = torch.cat((pos_embed, glip_pos_embed), dim = 0) # Left shape: (L, B, C)
+            mask = torch.cat((mask, glip_visual_mask), dim = 1) # Left shape: (B, L)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION == 'before':
+            pdb.set_trace()
+
         out_dec = self.decoder(
             query=target,
             key=memory,
@@ -110,10 +124,13 @@ class PETRTransformer(BaseModule):
             reg_branch=reg_branch,
             batched_inputs = batched_inputs,
         )   # out_dec shape: (num_layers, num_query, bs, dim)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION == 'after':
+            pdb.set_trace()
     
         out_dec = out_dec.transpose(1, 2)   # Left shape: (num_layers, bs, num_query, dim)
-        memory = memory.reshape(h, w, bs, c).permute(2, 3, 0, 1)  # Left shape: (bs, c, h, w)
-        return  out_dec, memory
+        #memory = memory.reshape(h, w, bs, c).permute(2, 3, 0, 1)  # Left shape: (bs, c, h, w)
+        return  out_dec, None
 
 @TRANSFORMER.register_module()
 class PETRDNTransformer(BaseModule):
