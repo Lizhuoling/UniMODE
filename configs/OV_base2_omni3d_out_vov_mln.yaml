@@ -6,8 +6,9 @@ DATASETS:
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
-  RESIZE_TGT_SIZE: (1280, 1024)
-  RANDOM_FLIP: "horizontal"
+  MIN_SIZE_TRAIN: (512,)
+  MIN_SIZE_TEST: 512
+  RANDOM_FLIP: "none"
   COLOR_AUG: True
 
 SOLVER:
@@ -39,7 +40,7 @@ MODEL:
       GRID_MASK: True
 
       BACKBONE_NAME: 'VoVNet'
-      BACKBONE_FP16: False
+      BACKBONE_FP16: True
       NECK_NAME: 'CPFPN_VoV'
       TRANSFORMER_NAME: 'PETR_TRANSFORMER'
       MATCHER_NAME: 'HungarianAssigner3D'
@@ -54,6 +55,7 @@ MODEL:
         REG_WEIGHT: 0.25
         DET_2D_L1_WEIGHT: 5.0
         DET_2D_GIOU_WEIGHT: 2.0
+        QUERY_MLN: True
 
       POST_PROCESS:
         CONFIDENCE_2D_THRE: 0.0

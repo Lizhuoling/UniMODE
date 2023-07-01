@@ -1,4 +1,4 @@
-exp_id=OV_base2_omni3d_out_vov_resize_mln
+exp_id=OV_base2_omni3d_out_vov_mln
 
 CUDA_VISIBLE_DEVICES=2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \

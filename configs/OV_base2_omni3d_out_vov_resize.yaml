@@ -7,7 +7,7 @@ DATASETS:
 
 INPUT:
   RESIZE_TGT_SIZE: (1280, 1024)
-  RANDOM_FLIP: "horizontal"
+  RANDOM_FLIP: "none"
   COLOR_AUG: True
 
 SOLVER:
@@ -54,7 +54,6 @@ MODEL:
         REG_WEIGHT: 0.25
         DET_2D_L1_WEIGHT: 5.0
         DET_2D_GIOU_WEIGHT: 2.0
-        QUERY_MLN: True
 
       POST_PROCESS:
         CONFIDENCE_2D_THRE: 0.0
