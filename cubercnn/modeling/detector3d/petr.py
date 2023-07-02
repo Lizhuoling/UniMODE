@@ -501,6 +501,8 @@ class PETR_HEAD(nn.Module):
             _, _, glip_vision_h, glip_vision_w = glip_visual_feat.shape
             glip_pos_embed, _ = self.position_embeding(glip_visual_feat, coords_d, Ks, masks.new_zeros(B, glip_vision_h, glip_vision_w), (glip_vision_w, glip_vision_h), glip_feat_flag = True)
             glip_text_feat = self.glip_text_adapter(glip_text_emb).permute(1, 0, 2)   # Left shape: (L, B, C)
+        else:
+            glip_visual_feat, glip_pos_embed, glip_text_feat = None, None, None
         
         outs_dec, _ = self.transformer(feat, masks, query_embeds, pos_embed, self.reg_branches, batched_inputs, \
             glip_visual_feat = glip_visual_feat, glip_pos_embed = glip_pos_embed, glip_text_feat = glip_text_feat) # Left shape: (num_layers, bs, num_query, dim)
