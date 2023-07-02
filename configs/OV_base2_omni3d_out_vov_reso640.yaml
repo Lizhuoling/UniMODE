@@ -6,8 +6,8 @@ DATASETS:
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
-  MIN_SIZE_TRAIN: (768,)
-  MIN_SIZE_TEST: 768
+  MIN_SIZE_TRAIN: (640,)
+  MIN_SIZE_TEST: 640
   RANDOM_FLIP: "none"
   COLOR_AUG: True
 
