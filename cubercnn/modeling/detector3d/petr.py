@@ -494,13 +494,13 @@ class PETR_HEAD(nn.Module):
             glip_text_feat = None
         elif self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'language':
             glip_visual_feat, glip_pos_embed = None, None
-            glip_text_feat = self.glip_text_adapter(glip_text_emb)   # Left shape: (B, L, C)
+            glip_text_feat = self.glip_text_adapter(glip_text_emb).permute(1, 0, 2)   # Left shape: (L, B, C)
         elif self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'VL':
             glip_visual_feat =  glip_visual_emb[self.cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL]
             glip_visual_feat = self.glip_vision_adapter(glip_visual_feat.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)    # Left shape: (B, C, feat_h, feat_w)
             _, _, glip_vision_h, glip_vision_w = glip_visual_feat.shape
             glip_pos_embed, _ = self.position_embeding(glip_visual_feat, coords_d, Ks, masks.new_zeros(B, glip_vision_h, glip_vision_w), (glip_vision_w, glip_vision_h), glip_feat_flag = True)
-            glip_text_feat = self.glip_text_adapter(glip_text_emb)   # Left shape: (B, L, C)
+            glip_text_feat = self.glip_text_adapter(glip_text_emb).permute(1, 0, 2)   # Left shape: (L, B, C)
         
         outs_dec, _ = self.transformer(feat, masks, query_embeds, pos_embed, self.reg_branches, batched_inputs, \
             glip_visual_feat = glip_visual_feat, glip_pos_embed = glip_pos_embed, glip_text_feat = glip_text_feat) # Left shape: (num_layers, bs, num_query, dim)

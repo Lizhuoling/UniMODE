@@ -32,6 +32,7 @@ from mmcv.utils import (ConfigDict, build_from_cfg, deprecated_api_warning,
 import copy
 import torch.utils.checkpoint as cp
 from .attention import FlashMHA
+from .detr_transformer import TransformerDecoderLayer
 
 from mmcv.runner import auto_fp16
 
@@ -65,6 +66,8 @@ class PETRTransformer(BaseModule):
         self.cross = cross
 
         self.cfg = cfg
+        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL'):
+            self.glip_text_decoderlayer = TransformerDecoderLayer(d_model = self.embed_dims, nhead = 8)
 
     def init_weights(self):
         # follow the official DETR to init parameters
@@ -126,7 +129,9 @@ class PETRTransformer(BaseModule):
         )   # out_dec shape: (num_layers, num_query, bs, dim)
 
         if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION == 'after':
-            pdb.set_trace()
+            prev_decs, last_dec = out_dec[:-1], out_dec[-1] # prev_decs shape: (num_dec - 1, L, B, C), last_dec shape: (L, B, C)
+            last_dec = self.glip_text_decoderlayer(last_dec, glip_text_feat, query_pos = query_embed)
+            out_dec = torch.cat((prev_decs, last_dec[None]), dim  = 0)  # Left shape: (num_dec, L, B, C)
     
         out_dec = out_dec.transpose(1, 2)   # Left shape: (num_layers, bs, num_query, dim)
         #memory = memory.reshape(h, w, bs, c).permute(2, 3, 0, 1)  # Left shape: (bs, c, h, w)

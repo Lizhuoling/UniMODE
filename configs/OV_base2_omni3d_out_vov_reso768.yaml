@@ -6,13 +6,13 @@ DATASETS:
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
-  MIN_SIZE_TRAIN: (512,)
-  MIN_SIZE_TEST: 512
+  MIN_SIZE_TRAIN: (768,)
+  MIN_SIZE_TEST: 768
   RANDOM_FLIP: "none"
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 64 #32
   TYPE: "adamw"
   BASE_LR: 4e-4
   MAX_ITER: 116000
@@ -46,10 +46,6 @@ MODEL:
       MATCHER_NAME: 'HungarianAssigner3D'
       DEPTH_LID: True
       NUM_QUERY: 200
-
-      GLIP_FEAT_FUSION: 'language'  # 'vision' or 'language' or 'VL' or 'none'
-      VISION_FUSION_LEVEL: 4
-      TEXT_FUSION_POSITION: 'after'  # before or after
 
       HEAD:
         OV_CLS_HEAD: True

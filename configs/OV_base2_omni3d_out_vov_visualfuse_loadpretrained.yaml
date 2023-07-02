@@ -47,7 +47,7 @@ MODEL:
       DEPTH_LID: True
       NUM_QUERY: 200
 
-      GLIP_FEAT_FUSION: 'language'  # 'vision' or 'language' or 'VL' or 'none'
+      GLIP_FEAT_FUSION: 'vision'  # 'vision' or 'language' or 'VL' or 'none'
       VISION_FUSION_LEVEL: 4
       TEXT_FUSION_POSITION: 'after'  # before or after
 

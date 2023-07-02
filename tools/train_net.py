@@ -147,12 +147,13 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
         
         # load ONLY the model, no checkpointables.
         checkpointer.load(cfg.MODEL.WEIGHTS_PRETRAIN, checkpointables=[])
-        
+    
     # determine the starting iteration, if resuming
-    start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS_PRETRAIN, resume=resume).get("iteration", -1) + 1)
-    iteration = start_iter
+    if resume:
+        start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS_PRETRAIN, resume=resume).get("iteration", -1) + 1)
+        iteration = start_iter
 
-    logger.info("Starting training from iteration {}".format(start_iter))
+        logger.info("Starting training from iteration {}".format(start_iter))
 
     if not cfg.MODEL.USE_BN:
         freeze_bn(model)
@@ -464,7 +465,7 @@ def main(args):
                 broadcast_buffers=False, find_unused_parameters=True
             )
             model._set_static_graph()
-
+        
         # train full model, potentially with resume.
         if do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=args.resume):
             break
