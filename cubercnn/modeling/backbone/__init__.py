@@ -4,3 +4,4 @@ from .resnet import *
 from .shufflenet import * 
 from .dla import * 
 from .vovnet import *
+from .eva import *

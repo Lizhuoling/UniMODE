@@ -48,13 +48,22 @@ class DETECTOR_PETR(nn.Module):
             self.grid_mask = False
 
         backbone_cfg = backbone_cfgs(cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME)
+        if 'EVA' in cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME:
+            assert len(cfg.INPUT.RESIZE_TGT_SIZE) == 2
+            assert cfg.INPUT.RESIZE_TGT_SIZE[0] == cfg.INPUT.RESIZE_TGT_SIZE[1]
+            backbone_cfg['img_size'] = cfg.INPUT.RESIZE_TGT_SIZE[0]
+        
         self.img_backbone = build_backbone(backbone_cfg)
         self.img_backbone.init_weights()
 
-        neck_cfg = neck_cfgs(cfg.MODEL.DETECTOR3D.PETR.NECK_NAME)
-        self.img_neck = build_neck(neck_cfg)
+        if cfg.MODEL.DETECTOR3D.PETR.USE_NECK:
+            neck_cfg = neck_cfgs(cfg.MODEL.DETECTOR3D.PETR.NECK_NAME)
+            self.img_neck = build_neck(neck_cfg)
+            petr_head_inchannel = neck_cfg['out_channels']
+        else:
+            petr_head_inchannel = self.img_backbone.embed_dim
 
-        self.petr_head = PETR_HEAD(cfg, in_channels = neck_cfg['out_channels'])
+        self.petr_head = PETR_HEAD(cfg, in_channels = petr_head_inchannel)
 
     @auto_fp16(apply_to=('imgs'), out_fp32=True)
     def extract_feat(self, imgs, batched_inputs):
@@ -63,8 +72,12 @@ class DETECTOR_PETR(nn.Module):
         backbone_feat_list = self.img_backbone(imgs)
         if type(backbone_feat_list) == dict: backbone_feat_list = list(backbone_feat_list.values())
         
-        neck_feat_list = self.img_neck(backbone_feat_list)
-        return neck_feat_list
+        if self.cfg.MODEL.DETECTOR3D.PETR.USE_NECK:
+            feat = self.img_neck(backbone_feat_list)[0]
+        else:
+            feat = backbone_feat_list
+
+        return feat
 
     def forward(self, images, batched_inputs, glip_results, class_name_emb, glip_text_emb, glip_visual_emb):
         Ks, scale_ratios = self.transform_intrinsics(images, batched_inputs)    # Transform the camera intrsincis based on input image augmentations.
@@ -92,8 +105,8 @@ class DETECTOR_PETR(nn.Module):
         cv2.imwrite('vis.png', img)
         pdb.set_trace()'''
         
-        feat_list = self.extract_feat(imgs = images.tensor, batched_inputs = batched_inputs)
-        petr_outs = self.petr_head(feat_list, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs, pad_img_resolution, glip_text_emb, glip_visual_emb)
+        feat = self.extract_feat(imgs = images.tensor, batched_inputs = batched_inputs)
+        petr_outs = self.petr_head(feat, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs, pad_img_resolution, glip_text_emb, glip_visual_emb)
         
         return petr_outs
 
@@ -155,6 +168,18 @@ def backbone_cfgs(backbone_name):
             input_ch=3,
             out_features=('stage4','stage5',),
             pretrained = 'MODEL/fcos3d_vovnet_imgbackbone_omni3d.pth',
+        ),
+        EVA_Base = dict(
+            type = 'eva02_base_patch14_xattn_fusedLN_NaiveSwiGLU_subln_RoPE',
+            pretrained = True,
+            init_ckpt = 'MODEL/eva02_B_pt_in21k_medft_in21k_ft_in1k_p14.pt',
+            use_mean_pooling = False,
+        ),
+        EVA_Large = dict(
+            type = 'eva02_large_patch14_xattn_fusedLN_NaiveSwiGLU_subln_RoPE',
+            pretrained = True,
+            init_ckpt = 'MODEL/eva02_L_pt_m38m_medft_in21k_ft_in1k_p14.pt',
+            use_mean_pooling = False,
         ),
     )
 
@@ -453,8 +478,8 @@ class PETR_HEAD(nn.Module):
 
         return glip_bbox_emb
 
-    def forward(self, feat_list, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs, pad_img_resolution, glip_text_emb, glip_visual_emb):
-        feat = self.input_proj(feat_list[0]) # Left shape: (B, C, feat_h, feat_w)
+    def forward(self, feat, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs, pad_img_resolution, glip_text_emb, glip_visual_emb):
+        feat = self.input_proj(feat) # Left shape: (B, C, feat_h, feat_w)
         B = feat.shape[0]
         
         # Prepare the class name embedding following the operations in GLIP.
