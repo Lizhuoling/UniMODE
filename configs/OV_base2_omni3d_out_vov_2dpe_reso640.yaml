@@ -1,14 +1,13 @@
-_BASE_: "Base_Omni3D.yaml"
+_BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
   TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
-  TEST: ('nuScenes_test', 'KITTI_test') 
+  TEST: ('nuScenes_test', 'KITTI_test')
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
-  RESIZE_TGT_SIZE: (532, 532)
-  #MIN_SIZE_TRAIN: (512,)
-  #MIN_SIZE_TEST: 512
+  MIN_SIZE_TRAIN: (640,)
+  MIN_SIZE_TEST: 640
   RANDOM_FLIP: "none"
   COLOR_AUG: True
 
@@ -40,14 +39,14 @@ MODEL:
     PETR:
       GRID_MASK: True
 
-      BACKBONE_NAME: 'EVA_Large'
+      BACKBONE_NAME: 'VoVNet'
       BACKBONE_FP16: True
-      USE_NECK: False
       NECK_NAME: 'CPFPN_VoV'
       TRANSFORMER_NAME: 'PETR_TRANSFORMER'
       MATCHER_NAME: 'HungarianAssigner3D'
       DEPTH_LID: True
       NUM_QUERY: 200
+      PE_2D: True
 
       HEAD:
         OV_CLS_HEAD: True
@@ -171,4 +170,4 @@ MODEL:
         ENABLED: True
         CLIP_TYPE: "full_model"
         CLIP_VALUE: 1.0
-        NORM_TYPE: 2.0
+        NORM_TYPE: 2.0 

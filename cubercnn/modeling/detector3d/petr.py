@@ -16,6 +16,7 @@ from detectron2.structures import Instances, Boxes
 
 from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn import Conv2d, Linear, build_activation_layer, bias_init_with_prob
+from mmcv.cnn.bricks.transformer import build_positional_encoding
 from mmdet3d.models import build_backbone
 from mmdet.models import build_neck
 from mmdet.models.utils import build_transformer
@@ -75,7 +76,11 @@ class DETECTOR_PETR(nn.Module):
         if self.cfg.MODEL.DETECTOR3D.PETR.USE_NECK:
             feat = self.img_neck(backbone_feat_list)[0]
         else:
+            assert 'EVA' in self.cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME
+            patch_size = 14
+            feat_h, feat_w = self.cfg.INPUT.RESIZE_TGT_SIZE[0] // patch_size, self.cfg.INPUT.RESIZE_TGT_SIZE[1] // patch_size
             feat = backbone_feat_list
+            feat = feat.permute(0, 2, 1).reshape(feat.shape[0], -1, feat_h, feat_w).contiguous() # Left shape: (B, C, H, W)
 
         return feat
 
@@ -286,6 +291,14 @@ class PETR_HEAD(nn.Module):
             nn.Conv2d(self.embed_dims*4, self.embed_dims, kernel_size=1, stride=1, padding=0),
         )
 
+        if cfg.MODEL.DETECTOR3D.PETR.PE_2D:
+            self.pos_2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
+            self.pos_2d_encoder = nn.Sequential(
+                nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+            )
+
         # Generating query heads
         self.lang_dim = cfg.MODEL.GLIP_MODEL.MODEL.LANGUAGE_BACKBONE.LANG_DIM
         if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
@@ -489,9 +502,12 @@ class PETR_HEAD(nn.Module):
             dot_product_proj_tokens = self.dot_product_projection_text(class_name_emb / 2.0) # Left shape: (cls_num, L)
             dot_product_proj_tokens_bias = torch.matmul(class_name_emb, self.bias_lang) + self.bias0 # Left shape: (cls_num)
 
-        masks = F.interpolate(masks[None], size=feat.shape[-2:])[0].to(torch.bool)
+        masks = F.interpolate(masks[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
         coords_d = self.produce_coords_d()
         pos_embed, _ = self.position_embeding(feat, coords_d, Ks, masks, pad_img_resolution)  # Left shape: (B, C, feat_h, feat_w)
+        if self.cfg.MODEL.DETECTOR3D.PETR.PE_2D:
+            pos_2d_embed = self.pos_2d_generator(masks) # Left shape: (B, C, H, W)
+            pos_embed = pos_embed + pos_2d_embed
 
         if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
             glip_bbox_emb = self.box_2d_emb(glip_results['bbox'], Ks, coords_d) # Left shape: (B, num_box, L)

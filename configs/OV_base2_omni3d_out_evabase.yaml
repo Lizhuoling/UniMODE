@@ -1,21 +1,17 @@
 _BASE_: "Base_Omni3D.yaml"
 
 DATASETS:
-  #TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
-  TRAIN: ('KITTI_val',)
-  #TEST: ('nuScenes_test', 'KITTI_test') 
-  TEST: ('KITTI_val',)
+  TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
+  TEST: ('nuScenes_test', 'KITTI_test') 
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
-  MIN_SIZE_TRAIN: (512,)
-  MIN_SIZE_TEST: 512
+  RESIZE_TGT_SIZE: (532, 532)
   RANDOM_FLIP: "none"
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 2
-  #IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 64
   TYPE: "adamw"
   BASE_LR: 4e-4
   MAX_ITER: 116000
@@ -44,6 +40,7 @@ MODEL:
 
       BACKBONE_NAME: 'EVA_Base'
       BACKBONE_FP16: True
+      USE_NECK: False
       NECK_NAME: 'CPFPN_VoV'
       TRANSFORMER_NAME: 'PETR_TRANSFORMER'
       MATCHER_NAME: 'HungarianAssigner3D'

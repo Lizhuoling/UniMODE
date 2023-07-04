@@ -707,13 +707,16 @@ def eva02_tiny_patch14_xattn_fusedLN_SwiGLU_preln_RoPE(pretrained=False, **kwarg
         qkv_bias=True,
         norm_layer=partial(torch.nn.LayerNorm, eps=1e-6), 
         #norm_layer=partial(FusedLayerNorm, eps=1e-6),
-        xattn=True,
+        xattn=False, #True,
         swiglu=True,
         rope=True,
         pt_hw_seq_len=16,   # 224/14
         intp_freq=True,
         **kwargs)
     model.default_cfg = _cfg()
+    assert kwargs['img_size'] % 14 == 0
+    assert kwargs['img_size'] % patch_size == 0
+
     if pretrained:
         checkpoint = torch.load(
             kwargs["init_ckpt"], map_location="cpu"
@@ -732,13 +735,16 @@ def eva02_small_patch14_xattn_fusedLN_SwiGLU_preln_RoPE(pretrained=False, **kwar
         qkv_bias=True,
         norm_layer=partial(torch.nn.LayerNorm, eps=1e-6), 
         #norm_layer=partial(FusedLayerNorm, eps=1e-6),
-        xattn=True,
+        xattn=False, #True,
         swiglu=True,
         rope=True,
         pt_hw_seq_len=16,   # 224/14
         intp_freq=True,
         **kwargs)
     model.default_cfg = _cfg()
+    assert kwargs['img_size'] % 14 == 0
+    assert kwargs['img_size'] % patch_size == 0
+
     if pretrained:
         checkpoint = torch.load(
             kwargs["init_ckpt"], map_location="cpu"
@@ -758,19 +764,21 @@ def eva02_base_patch14_xattn_fusedLN_NaiveSwiGLU_subln_RoPE(pretrained=False, **
         norm_layer=partial(torch.nn.LayerNorm, eps=1e-6), 
         #norm_layer=partial(FusedLayerNorm, eps=1e-6), 
         subln=True,
-        xattn=True,
+        xattn=False, #True,
         naiveswiglu=True,
         rope=True, 
         pt_hw_seq_len=16,   # 224/14
         intp_freq=True,
         **kwargs)
     model.default_cfg = _cfg()
+    assert kwargs['img_size'] % 14 == 0
+
     if pretrained:
         checkpoint = torch.load(
             kwargs["init_ckpt"], map_location="cpu"
         )
+        checkpoint = remove_rope(checkpoint)
         model.load_state_dict(checkpoint["module"], strict = False)
-        #model.load_state_dict(checkpoint["model"])
     return model
 
 @BACKBONES.register_module()
@@ -792,6 +800,8 @@ def eva02_large_patch14_xattn_fusedLN_NaiveSwiGLU_subln_RoPE(pretrained=False, *
         intp_freq=True,
         **kwargs)
     model.default_cfg = _cfg()
+    assert kwargs['img_size'] % 14 == 0
+
     if pretrained:
         checkpoint = torch.load(
             kwargs["init_ckpt"], map_location="cpu"

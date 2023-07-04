@@ -51,6 +51,7 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME = 'PETR_TRANSFORMR'
     cfg.MODEL.DETECTOR3D.PETR.MATCHER_NAME = 'HungarianAssigner3D'
     cfg.MODEL.DETECTOR3D.PETR.DEPTH_LID = True
+    cfg.MODEL.DETECTOR3D.PETR.PE_2D = False
 
     cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION = 'none'  # 'vision' or 'language' or 'text' or 'none'
     cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL = 4
