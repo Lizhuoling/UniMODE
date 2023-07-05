@@ -20,7 +20,7 @@ from detectron2.engine import (
     default_writers, 
     launch
 )
-from detectron2.solver import build_lr_scheduler
+#from detectron2.solver import build_lr_scheduler
 from detectron2.utils.events import EventStorage
 from detectron2.utils.logger import setup_logger
 
@@ -34,7 +34,7 @@ sys.dont_write_bytecode = True
 sys.path.append(os.getcwd())
 np.set_printoptions(suppress=True)
 
-from cubercnn.solver import build_optimizer, freeze_bn, PeriodicCheckpointerOnlyOne
+from cubercnn.solver import build_optimizer, freeze_bn, PeriodicCheckpointerOnlyOne, build_lr_scheduler
 from cubercnn.config import get_cfg_defaults
 from cubercnn.data import (
     load_omni3d_json,

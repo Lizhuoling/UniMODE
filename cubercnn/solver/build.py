@@ -1,8 +1,10 @@
 import pdb
 import torch
+import math
 from typing import Any, Dict, List, Set
 from detectron2.solver.build import maybe_add_gradient_clipping
 from torch.nn.parallel import DistributedDataParallel
+import torch.optim.lr_scheduler as lr_sched
 
 from mmcv.runner.optimizer import DefaultOptimizerConstructor
 
@@ -97,3 +99,64 @@ def freeze_bn(network):
         if isinstance(module, torch.nn.BatchNorm2d):
             module.eval()
             module.track_running_stats = False
+
+def build_lr_scheduler(cfg, optimizer):
+    """
+    Build a LR scheduler from config.
+    """
+    name = cfg.SOLVER.LR_SCHEDULER_NAME
+
+    if name == "CosineAnnealing":
+        total_epochs = math.ceil(cfg.SOLVER.MAX_ITER / cfg.SOLVER.VIRTUAL_EPOCH_PER_ITERATION)
+        lr_scheduler = lr_sched.CosineAnnealingLR(optimizer, T_max=total_epochs)
+
+    elif name == "WarmupMultiStepLR":
+        steps = [x for x in cfg.SOLVER.STEPS if x <= cfg.SOLVER.MAX_ITER]
+        if len(steps) != len(cfg.SOLVER.STEPS):
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "SOLVER.STEPS contains values larger than SOLVER.MAX_ITER. "
+                "These values will be ignored."
+            )
+        sched = MultiStepParamScheduler(
+            values=[cfg.SOLVER.GAMMA**k for k in range(len(steps) + 1)],
+            milestones=steps,
+            num_updates=cfg.SOLVER.MAX_ITER,
+        )
+    elif name == "WarmupCosineLR":
+        end_value = cfg.SOLVER.BASE_LR_END / cfg.SOLVER.BASE_LR
+        assert end_value >= 0.0 and end_value <= 1.0, end_value
+        sched = CosineParamScheduler(1, end_value)
+    elif name == "WarmupStepWithFixedGammaLR":
+        sched = StepWithFixedGammaParamScheduler(
+            base_value=1.0,
+            gamma=cfg.SOLVER.GAMMA,
+            num_decays=cfg.SOLVER.NUM_DECAYS,
+            num_updates=cfg.SOLVER.MAX_ITER,
+        )
+    else:
+        raise ValueError("Unknown LR scheduler: {}".format(name))
+
+    if name == "CosineAnnealing":
+        lr_warmup_scheduler = LinearWarmupLR(optimizer, warmup_steps=cfg.SOLVER.WARMUP_ITERS, warmup_ratios=cfg.SOLVER.WARMUP_FACTOR)
+        return lr_scheduler, lr_warmup_scheduler
+    else:
+        sched = WarmupParamScheduler(
+            sched,
+            cfg.SOLVER.WARMUP_FACTOR,
+            min(cfg.SOLVER.WARMUP_ITERS / cfg.SOLVER.MAX_ITER, 1.0),
+            cfg.SOLVER.WARMUP_METHOD,
+            cfg.SOLVER.RESCALE_INTERVAL,
+        )
+        return LRMultiplier(optimizer, multiplier=sched, max_iter=cfg.SOLVER.MAX_ITER)
+
+class LinearWarmupLR(lr_sched._LRScheduler):
+    def __init__(self, optimizer, warmup_steps, warmup_ratios=0.3333, last_epoch=-1):
+        self.warmup_steps = warmup_steps
+        self.warmup_ratios = warmup_ratios
+        super(LinearWarmupLR, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        k = (1 - self.last_epoch / self.warmup_steps) * (1 - self.warmup_ratios)
+
+        return [base_lr * (1-k) for base_lr in self.base_lrs]

@@ -1,8 +1,8 @@
 exp_id=OV_base2_omni3d_out_vov_optim_noGLIP_detr
 
-CUDA_VISIBLE_DEVICES=0 python tools/train_net.py \
+CUDA_VISIBLE_DEVICES=2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
-  --num-gpus 1 \
+  --num-gpus 2 \
   --dist-url tcp://127.0.0.1:12345 \
   OUTPUT_DIR output/$exp_id \
   #--resume \
