@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Set
 from detectron2.solver.build import maybe_add_gradient_clipping
 from torch.nn.parallel import DistributedDataParallel
 
+from mmcv.runner.optimizer import DefaultOptimizerConstructor
+
 def build_optimizer(cfg, model):
     norm_module_types = (
         torch.nn.BatchNorm1d,
@@ -21,7 +23,13 @@ def build_optimizer(cfg, model):
     memo: Set[torch.nn.parameter.Parameter] = set()
 
     # For RCNN3D
-    if cfg.SOLVER.TYPE == 'sgd':
+    if cfg.SOLVER.TYPE == 'mmcv_AdamW':
+        optimizer = dict(type='AdamW', lr=cfg.SOLVER.BASE_LR, weight_decay=0.01)
+        paramwise_cfg = dict(custom_keys={'img_backbone': dict(lr_mult=0.1)})
+        optimizer_constructor = DefaultOptimizerConstructor(optimizer, paramwise_cfg)
+        optimizer = optimizer_constructor(model)
+
+    elif cfg.SOLVER.TYPE == 'sgd':
         for module in model.modules():
             for key, value in module.named_parameters(recurse=False):
                 if not value.requires_grad:
@@ -61,7 +69,7 @@ def build_optimizer(cfg, model):
             {"params": model.detector.img_backbone.parameters(), "lr": lr_mult * lr},
         ]
 
-    if cfg.SOLVER.TYPE == 'sgd':
+    elif cfg.SOLVER.TYPE == 'sgd':
         optimizer = torch.optim.SGD(
             params, 
             cfg.SOLVER.BASE_LR, 

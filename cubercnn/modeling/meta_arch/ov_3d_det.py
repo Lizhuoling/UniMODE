@@ -140,6 +140,7 @@ class OV_3D_Det(nn.Module):
             glip_results['cls_emb'] = torch.stack([ele.get_field('cls_emb') for ele in glip_outs], dim  = 0)  # Left shape: (bs, box_num, cls_emb_len)
         else:
             glip_results = {}
+            glip_text_emb, glip_visual_emb = None, None
         
         # 3D Det
         detector_out = self.detector(images, batched_inputs, glip_results, self.class_name_emb, glip_text_emb, glip_visual_emb)

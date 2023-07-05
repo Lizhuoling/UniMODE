@@ -569,13 +569,20 @@ class PETR_HEAD(nn.Module):
         outputs_classes = torch.stack(outputs_classes, dim = 0)
         outputs_regs = torch.stack(outputs_regs, dim = 0)
         
-        outputs_regs[..., self.reg_key_manager('loc')] = outputs_regs[..., self.reg_key_manager('loc')].sigmoid()
-        outputs_regs[..., self.reg_key_manager('loc')][..., 0] = outputs_regs[..., self.reg_key_manager('loc')][..., 0] * \
-            (self.position_range[1] - self.position_range[0]) + self.position_range[0]
-        outputs_regs[..., self.reg_key_manager('loc')][..., 1] = outputs_regs[..., self.reg_key_manager('loc')][..., 1] * \
-            (self.position_range[3] - self.position_range[2]) + self.position_range[2]
-        outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
-            (self.position_range[5] - self.position_range[4]) + self.position_range[4]
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'xyz':
+            outputs_regs[..., self.reg_key_manager('loc')] = outputs_regs[..., self.reg_key_manager('loc')].sigmoid()
+            outputs_regs[..., self.reg_key_manager('loc')][..., 0] = outputs_regs[..., self.reg_key_manager('loc')][..., 0] * \
+                (self.position_range[1] - self.position_range[0]) + self.position_range[0]
+            outputs_regs[..., self.reg_key_manager('loc')][..., 1] = outputs_regs[..., self.reg_key_manager('loc')][..., 1] * \
+                (self.position_range[3] - self.position_range[2]) + self.position_range[2]
+            outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
+                (self.position_range[5] - self.position_range[4]) + self.position_range[4]
+        elif self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'uvd':
+            outputs_regs[..., self.reg_key_manager('loc')] = outputs_regs[..., self.reg_key_manager('loc')].sigmoid()
+            outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
+                (self.position_range[5] - self.position_range[4]) + self.position_range[4]  # depth
+        else:
+            raise Exception("Unsupported loc_mode: {}".format(self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE))
 
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
             outputs_regs[..., self.reg_key_manager('det2d_xywh')] = outputs_regs[..., self.reg_key_manager('det2d_xywh')].sigmoid()
@@ -706,12 +713,22 @@ class PETR_HEAD(nn.Module):
         cls_scores_list = [cls_scores[i] for i in range(num_imgs)]
         bbox_preds_list = [bbox_preds[i] for i in range(num_imgs)]
         device = cls_scores.device
-        
-        assign_results = self.get_matching(cls_scores_list, bbox_preds_list, batched_inputs, ori_img_resolution)
+        h_scale_ratios = [augmented_reso[1] / info['height'] for info, augmented_reso in zip(batched_inputs, ori_img_resolution)]
+
+        Ks = torch.Tensor(np.array([ele['K'] for ele in batched_inputs])).cuda()
+        height_im_scales_ratios = np.array([im_reso.cpu().numpy()[1] / info['height'] for (info, im_reso) in zip(batched_inputs, ori_img_resolution)])
+        width_im_scales_ratios = np.array([im_reso.cpu().numpy()[0] / info['width'] for (info, im_reso) in zip(batched_inputs, ori_img_resolution)])
+        scale_ratios = torch.Tensor(np.stack((width_im_scales_ratios, height_im_scales_ratios), axis = 1)).cuda()   # Left shape: (B, 2)
+        Ks[:, 0, :] = Ks[:, 0, :] * scale_ratios[:, 0].unsqueeze(1)
+        Ks[:, 1, :] = Ks[:, 1, :] * scale_ratios[:, 1].unsqueeze(1) # The Ks after rescaling
+        Ks_list = [ele.squeeze(0) for ele in torch.split(Ks, 1, dim = 0)]
+        assign_results = self.get_matching(cls_scores_list, bbox_preds_list, batched_inputs, ori_img_resolution, h_scale_ratios, Ks_list)
 
         loss_dict = {'cls_loss_{}'.format(dec_idx): 0, 'loc_loss_{}'.format(dec_idx): 0, 'dim_loss_{}'.format(dec_idx): 0, 'pose_loss_{}'.format(dec_idx): 0}
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
             loss_dict.update({'det2d_reg_loss_{}'.format(dec_idx): 0, 'det2d_iou_loss_{}'.format(dec_idx): 0})
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'uvd':
+            loss_dict.update({'loc_uv_loss_{}'.format(dec_idx): 0, 'loc_d_loss_{}'.format(dec_idx): 0})
 
         num_pos = 0
         for bs, (pred_idxs, gt_idxs) in enumerate(assign_results):
@@ -729,11 +746,22 @@ class PETR_HEAD(nn.Module):
             bs_loc_gts = bs_gt_instance.get('gt_boxes3D')[..., 6:9].to(device)[gt_idxs] # Left shape: (num_gt, 3)
             bs_dim_gts = bs_gt_instance.get('gt_boxes3D')[..., 3:6].to(device)[gt_idxs] # Left shape: (num_gt, 3)
             bs_pose_gts = bs_gt_instance.get('gt_poses').to(device)[gt_idxs] # Left shape: (num_gt, 3, 3)
+            if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'uvd':
+                bs_uvd_gts = bs_gt_instance.get('gt_boxes3D')[..., 0:3].to(device)[gt_idxs] # Left shape: (num_gt, 3)
+                bs_uvd_gts[:, :2] = bs_uvd_gts[:, :2] / ori_img_resolution[bs][None]
+                if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.VIRTUAL_DEPTH:
+                    virtual_focal_y = self.cfg.MODEL.DETECTOR3D.PETR.HEAD.VIRTUAL_FOCAL_Y
+                    augmented_focal_y = Ks_list[bs][1][1]
+                    bs_uvd_gts[:, 2:3] = bs_uvd_gts[:, 2:3] / h_scale_ratios[bs] * virtual_focal_y / augmented_focal_y
+                    
+                bs_loc_xyz_preds = bs_loc_preds.clone() # Left shape: (num_gt, 3)
+                bs_loc_xyz_preds = torch.cat((bs_loc_xyz_preds[:, :2] * bs_loc_xyz_preds[:, 2:3], bs_loc_xyz_preds[:, 2:3]), dim = 1)
+                bs_loc_xyz_preds = (Ks_list[bs].inverse().unsqueeze(0) @ bs_loc_xyz_preds.unsqueeze(-1)).squeeze(-1)    # Left shape: (num_gt, 3)
 
             if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
                 bs_det2d_xywh_preds = bs_bbox_preds[..., self.reg_key_manager('det2d_xywh')]   # Left shape: (num_query, 4)
                 bs_det2d_gts = bs_gt_instance.get('gt_boxes').to(device)[gt_idxs].tensor # Left shape: (num_gt, 4)
-                img_scale = torch.cat((ori_img_resolution, ori_img_resolution), dim = 0)    # Left shape: (4,)
+                img_scale = torch.cat((ori_img_resolution[bs], ori_img_resolution[bs]), dim = 0)    # Left shape: (4,)
                 bs_det2d_gts = bs_det2d_gts / img_scale[None]   # Left shape: (num_gt, 4)
 
             # For debug
@@ -754,6 +782,10 @@ class PETR_HEAD(nn.Module):
                 cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 2)
             for idx in range(bs_loc_preds.shape[0]):
                 draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_preds[idx].detach().cpu(), bs_dim_preds[idx].exp().detach().cpu()), dim = 0).numpy(), bs_pose_preds[idx].detach().cpu().numpy())
+            gt_boxes3D = batched_inputs[bs]['instances']._fields['gt_boxes3D']
+            gt_proj_centers = gt_boxes3D[:, 0:2]    # The projected 3D centers have been resized.
+            for gt_proj_center in gt_proj_centers:
+                cv2.circle(img, gt_proj_center.cpu().numpy().astype(np.int32), radius = 3, color = (0, 0, 255), thickness = -1)
             cv2.imwrite('vis.png', img)
             pdb.set_trace()'''
             
@@ -764,9 +796,16 @@ class PETR_HEAD(nn.Module):
             loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * torchvision.ops.sigmoid_focal_loss(bs_cls_scores, bs_cls_gts_onehot.float(), reduction = 'none').sum()
             
             # Localization loss
-            loss_dict['loc_loss_{}'.format(dec_idx)] += self.reg_weight * (math.sqrt(2) * self.reg_loss(bs_loc_preds, bs_loc_gts)\
+            if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'xyz':
+                loss_dict['loc_loss_{}'.format(dec_idx)] += self.reg_weight * (math.sqrt(2) * self.reg_loss(bs_loc_preds, bs_loc_gts)\
                                                             .sum(-1, keepdim=True) / bs_uncern_preds.exp() + bs_uncern_preds).sum()
-
+            elif self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'uvd':
+                loss_dict['loc_uv_loss_{}'.format(dec_idx)] += self.det2d_l1_weight * self.reg_loss(bs_loc_preds[:, :2], bs_uvd_gts[:, :2]).sum()
+                loss_dict['loc_d_loss_{}'.format(dec_idx)] += self.reg_weight * self.reg_loss(bs_loc_preds[:, 2:3], bs_uvd_gts[:, 2:3]).sum()
+                
+                loss_dict['loc_loss_{}'.format(dec_idx)] += self.reg_weight * (math.sqrt(2) * self.reg_loss(bs_loc_xyz_preds, bs_loc_gts)\
+                                                            .sum(-1, keepdim=True) / bs_uncern_preds.exp() + bs_uncern_preds).sum()
+            
             # Dimension loss
             loss_dict['dim_loss_{}'.format(dec_idx)] += self.reg_weight * self.reg_loss(bs_dim_preds, bs_dim_gts.log()).sum()
 
@@ -790,22 +829,22 @@ class PETR_HEAD(nn.Module):
         
         return (loss_dict,)
 
-    def get_matching(self, cls_scores_list, bbox_preds_list, batched_inputs, ori_img_resolution):
+    def get_matching(self, cls_scores_list, bbox_preds_list, batched_inputs, ori_img_resolution, h_scale_ratios, Ks_list):
         '''
         Description: 
             One-to-one matching for a single batch.
         '''
         bs = len(cls_scores_list)
         ori_img_resolution = torch.split(ori_img_resolution, 1, dim = 0)
-        assign_results = multi_apply(self.get_matching_single, cls_scores_list, bbox_preds_list, batched_inputs, ori_img_resolution)[0]
+        assign_results = multi_apply(self.get_matching_single, cls_scores_list, bbox_preds_list, batched_inputs, ori_img_resolution, h_scale_ratios, Ks_list)[0]
         return assign_results
         
-    def get_matching_single(self, cls_scores, bbox_preds, batched_input, ori_img_resolution):
+    def get_matching_single(self, cls_scores, bbox_preds, batched_input, ori_img_resolution, h_scale_ratio, Ks):
         '''
         Description: 
             One-to-one matching for a single image.
         '''
-        assign_result = self.matcher.assign(bbox_preds, cls_scores, batched_input, self.reg_key_manager, ori_img_resolution)
+        assign_result = self.matcher.assign(bbox_preds, cls_scores, batched_input, self.reg_key_manager, ori_img_resolution, h_scale_ratio, Ks)
         return assign_result
         
 def pos2posemb3d(pos, num_pos_feats=128, temperature=10000):

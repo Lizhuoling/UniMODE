@@ -39,25 +39,56 @@ class Transformer(nn.Module):
 
         self.d_model = d_model
         self.nhead = nhead
+        self.cfg = cfg
+        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL'):
+            self.glip_text_decoderlayer = TransformerDecoderLayer(d_model = d_model, nhead = 8)
 
     def _reset_parameters(self):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, mask, query_embed, pos_embed, reg_branch=None, batched_inputs = None):
+    def forward(self, src, mask, query_embed, pos_embed, reg_branch=None, batched_inputs = None, glip_visual_feat = None, glip_pos_embed = None, glip_text_feat = None):
         # flatten NxCxHxW to HWxNxC
         bs, c, h, w = src.shape
         src = src.flatten(2).permute(2, 0, 1)   # [bs, c, h, w] -> [h*w, bs, c]
         pos_embed = pos_embed.flatten(2).permute(2, 0, 1)   # [bs, c, h, w] -> [h*w, bs, c]
         query_embed = query_embed.permute(1, 0, 2)   # [bs, num_query, dim] -> [num_query, bs, dim]
         mask = mask.flatten(1)
-        
         tgt = torch.zeros_like(query_embed)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('vision', 'VL'):
+            _, _, glip_visual_h, glip_visual_w = glip_visual_feat.shape
+            glip_visual_feat = glip_visual_feat.permute(2, 3, 0, 1).reshape(-1, bs, c)
+            glip_pos_embed = glip_pos_embed.permute(2, 3, 0, 1).reshape(-1, bs, c)
+            glip_visual_mask = mask.new_zeros((bs, glip_visual_h * glip_visual_w))
+            src = torch.cat((src, glip_visual_feat), dim  = 0)    # Left shape: (L, B, C)
+            pos_embed = torch.cat((pos_embed, glip_pos_embed), dim = 0) # Left shape: (L, B, C)
+            mask = torch.cat((mask, glip_visual_mask), dim = 1) # Left shape: (B, L)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION == 'before':
+            prev_decs, last_dec = out_dec[:-1], out_dec[-1] # prev_decs shape: (num_dec - 1, L, B, C), last_dec shape: (L, B, C)
+            last_dec = self.glip_text_decoderlayer(last_dec, glip_text_feat, query_pos = query_embed)
+            out_dec = torch.cat((prev_decs, last_dec[None]), dim  = 0)  # Left shape: (num_dec, L, B, C)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION == 'after':
+            prev_decs, last_dec = out_dec[:-1], out_dec[-1] # prev_decs shape: (num_dec - 1, L, B, C), last_dec shape: (L, B, C)
+            last_dec = self.glip_text_decoderlayer(last_dec, glip_text_feat, query_pos = query_embed)
+            out_dec = torch.cat((prev_decs, last_dec[None]), dim  = 0)  # Left shape: (num_dec, L, B, C)
+
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
         hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
                           pos=pos_embed, query_pos=query_embed)
-        return hs.transpose(1, 2), memory.permute(1, 2, 0).view(bs, c, h, w)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION == 'after':
+            prev_decs, last_dec = hs[:-1], hs[-1] # prev_decs shape: (num_dec - 1, L, B, C), last_dec shape: (L, B, C)
+            last_dec = self.glip_text_decoderlayer(last_dec, glip_text_feat, query_pos = query_embed)
+            hs = torch.cat((prev_decs, last_dec[None]), dim  = 0)  # Left shape: (num_dec, L, B, C)
+
+        hs = hs.transpose(1, 2)
+        #memory = memory.permute(1, 2, 0).view(bs, c, h, w)
+        
+        return hs, None
 
 
 class TransformerEncoder(nn.Module):
@@ -275,7 +306,7 @@ def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-def build_detr_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm):
+def build_detr_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm, cfg = None):
     return Transformer(
         d_model=hidden_dim,
         dropout=dropout,
@@ -285,6 +316,7 @@ def build_detr_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_lay
         num_decoder_layers=dec_layers,
         normalize_before=pre_norm,
         return_intermediate_dec=True,
+        cfg = cfg,
     )
 
 

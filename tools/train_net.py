@@ -130,6 +130,8 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
 
     optimizer = build_optimizer(cfg, model)
     scheduler = build_lr_scheduler(cfg, optimizer)
+    if cfg.SOLVER.LR_SCHEDULER_NAME == 'CosineAnnealing':
+        scheduler, lr_warmup_scheduler = scheduler
 
     # bookkeeping
     checkpointer = DetectionCheckpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)    
@@ -294,8 +296,14 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
                 del checkpointer
                 del periodic_checkpointer
                 return False
-                
-            scheduler.step()
+            if cfg.SOLVER.LR_SCHEDULER_NAME == 'CosineAnnealing':
+                if iteration < cfg.SOLVER.WARMUP_ITERS:
+                    lr_warmup_scheduler.step(iteration)
+                else:
+                    cur_epoch = iteration // cfg.SOLVER.VIRTUAL_EPOCH_PER_ITERATION
+                    scheduler.step(cur_epoch)
+            else:
+                scheduler.step()
 
             # Evaluate only when the loss is not diverging.
             if not (diverging_model > 0) and \

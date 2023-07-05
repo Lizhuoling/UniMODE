@@ -115,7 +115,9 @@ class PETRTransformer(BaseModule):
             mask = torch.cat((mask, glip_visual_mask), dim = 1) # Left shape: (B, L)
 
         if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION == 'before':
-            pdb.set_trace()
+            prev_decs, last_dec = out_dec[:-1], out_dec[-1] # prev_decs shape: (num_dec - 1, L, B, C), last_dec shape: (L, B, C)
+            last_dec = self.glip_text_decoderlayer(last_dec, glip_text_feat, query_pos = query_embed)
+            out_dec = torch.cat((prev_decs, last_dec[None]), dim  = 0)  # Left shape: (num_dec, L, B, C)
 
         out_dec = self.decoder(
             query=target,
