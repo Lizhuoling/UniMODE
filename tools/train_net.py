@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
+import math
 import os
 import sys
 import pdb
@@ -300,7 +301,8 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
                 if iteration < cfg.SOLVER.WARMUP_ITERS:
                     lr_warmup_scheduler.step(iteration)
                 else:
-                    cur_epoch = iteration // cfg.SOLVER.VIRTUAL_EPOCHS
+                    virtual_iteration_per_epoch = math.ceil(cfg.SOLVER.MAX_ITER / cfg.SOLVER.VIRTUAL_EPOCHS)
+                    cur_epoch = iteration // virtual_iteration_per_epoch
                     scheduler.step(cur_epoch)
             else:
                 scheduler.step()

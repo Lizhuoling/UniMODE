@@ -58,7 +58,7 @@ MODEL:
         DET_2D_L1_WEIGHT: 5.0
         DET_2D_GIOU_WEIGHT: 2.0
 
-        ENC_NUM: 3
+        ENC_NUM: 0
         DEC_NUM: 6
 
       POST_PROCESS:

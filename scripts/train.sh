@@ -1,4 +1,4 @@
-exp_id=BEVglobal_base1_omni3d_out_vov
+exp_id=BEVglobal_base1_omni3d_out_vov_bbfp16
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
