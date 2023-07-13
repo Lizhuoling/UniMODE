@@ -26,7 +26,7 @@ def build_optimizer(cfg, model):
 
     # For RCNN3D
     if cfg.SOLVER.TYPE == 'mmcv_AdamW':
-        optimizer = dict(type='AdamW', lr=cfg.SOLVER.BASE_LR, weight_decay=0.01)
+        optimizer = dict(type='AdamW', lr=cfg.SOLVER.BASE_LR, weight_decay=cfg.SOLVER.WEIGHT_DECAY)
         paramwise_cfg = dict(custom_keys={'img_backbone': dict(lr_mult=0.1)})
         optimizer_constructor = DefaultOptimizerConstructor(optimizer, paramwise_cfg)
         optimizer = optimizer_constructor(model)
@@ -107,7 +107,7 @@ def build_lr_scheduler(cfg, optimizer):
     name = cfg.SOLVER.LR_SCHEDULER_NAME
 
     if name == "CosineAnnealing":
-        total_epochs = math.ceil(cfg.SOLVER.MAX_ITER / cfg.SOLVER.VIRTUAL_EPOCH_PER_ITERATION)
+        total_epochs = cfg.SOLVER.VIRTUAL_EPOCHS
         lr_scheduler = lr_sched.CosineAnnealingLR(optimizer, T_max=total_epochs)
 
     elif name == "WarmupMultiStepLR":

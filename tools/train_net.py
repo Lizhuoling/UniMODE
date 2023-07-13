@@ -300,7 +300,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
                 if iteration < cfg.SOLVER.WARMUP_ITERS:
                     lr_warmup_scheduler.step(iteration)
                 else:
-                    cur_epoch = iteration // cfg.SOLVER.VIRTUAL_EPOCH_PER_ITERATION
+                    cur_epoch = iteration // cfg.SOLVER.VIRTUAL_EPOCHS
                     scheduler.step(cur_epoch)
             else:
                 scheduler.step()

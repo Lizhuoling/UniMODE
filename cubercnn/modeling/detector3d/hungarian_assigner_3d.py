@@ -93,13 +93,6 @@ class HungarianAssigner3D(BaseAssigner):
         loc_gts = gt_instance.get('gt_boxes3D')[..., 6:9].to(device) # Left shape: (num_gt, 3)
         dim_gts = gt_instance.get('gt_boxes3D')[..., 3:6].to(device) # Left shape: (num_gt, 3)
         pose_gts = gt_instance.get('gt_poses').to(device) # Left shape: (num_gt, 3, 3)
-        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'uvd':
-            uvd_gts = gt_instance.get('gt_boxes3D')[..., 0:3].to(device) # Left shape: (num_gt, 3)
-            uvd_gts[:, :2] = uvd_gts[:, :2] / ori_img_resolution    # Normalize projected 3D centers.
-            if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.VIRTUAL_DEPTH:
-                virtual_focal_y = self.cfg.MODEL.DETECTOR3D.PETR.HEAD.VIRTUAL_FOCAL_Y
-                augmented_focal_y = Ks[1][1]
-                uvd_gts[:, 2:3] = uvd_gts[:, 2:3] / h_scale_ratio * virtual_focal_y / augmented_focal_y
             
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
             det2d_xywh_preds = bbox_preds[..., reg_key_manager('det2d_xywh')] # Left shape: (num_query, 4)
@@ -116,28 +109,10 @@ class HungarianAssigner3D(BaseAssigner):
         expand_cls_gts = F.one_hot(cls_gts, num_classes = self.total_cls_num)[None].expand(num_preds, -1, -1)   # Left shape: (num_query, num_gt, num_cls)
         cls_cost = self.cls_weight * torchvision.ops.sigmoid_focal_loss(expand_cls_scores, expand_cls_gts.float(), reduction = 'none').sum(-1)
         
-        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'xyz':
-            loc_preds = loc_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 3)
-            uncern_preds = uncern_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 1)
-            loc_gts = loc_gts[None].expand(num_preds, -1, -1)   # Left shape: (num_query, num_gt, 3)
-            loc_cost = self.reg_weight * (math.sqrt(2) * self.reg_loss(loc_preds, loc_gts).sum(-1, keepdim=True) / uncern_preds.exp() + uncern_preds).squeeze(-1) # Left shape: (num_query, num_gt)
-        elif self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'uvd':
-            clone_loc_preds = loc_preds.clone()
-            loc_xyz_preds = loc_preds.clone()
-            loc_uv_preds = clone_loc_preds[:, :2].unsqueeze(1).expand(-1, num_gts, -1) # Left shape: (num_query, num_gt, 2)
-            loc_d_preds = clone_loc_preds[:, 2:3].unsqueeze(1).expand(-1, num_gts, -1) # Left shape: (num_query, num_gt, 1)
-            loc_uv_gts = uvd_gts[:, :2][None].expand(num_preds, -1, -1) # Left shape: (num_query, num_gt, 2)
-            loc_d_gts = uvd_gts[:, 2:3][None].expand(num_preds, -1, -1) # Left shape: (num_query, num_gt, 1)
-            loc_xyz_preds[:, :2] = loc_xyz_preds[:, :2] * loc_xyz_preds[:, 2:]  # Left shape: (num_query, 3)
-            loc_xyz_preds = (Ks.inverse().unsqueeze(0) @ loc_xyz_preds.unsqueeze(-1)).squeeze(-1)   # Left shape: (num_query, 3)
-            loc_xyz_preds = loc_xyz_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 3)
-            # Projected 3D center
-            loc_cost = self.det2d_l1_weight * self.reg_loss(loc_uv_preds, loc_uv_gts).sum(-1)
-            uncern_preds = uncern_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 1)
-            # Depth loss
-            loc_cost = loc_cost + self.reg_weight * self.reg_loss(loc_d_preds, loc_d_gts).squeeze(-1)
-            # Loc loss
-            loc_cost = loc_cost + self.reg_weight * (math.sqrt(2) * self.reg_loss(loc_xyz_preds, loc_gts).sum(-1, keepdim=True) / uncern_preds.exp() + uncern_preds).squeeze(-1) # Left shape: (num_query, num_gt)
+        loc_preds = loc_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 3)
+        uncern_preds = uncern_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 1)
+        loc_gts = loc_gts[None].expand(num_preds, -1, -1)   # Left shape: (num_query, num_gt, 3)
+        loc_cost = self.reg_weight * (math.sqrt(2) * self.reg_loss(loc_preds, loc_gts).sum(-1, keepdim=True) / uncern_preds.exp() + uncern_preds).squeeze(-1) # Left shape: (num_query, num_gt)
             
         dim_preds = dim_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 3)
         dim_gts = dim_gts[None].expand(num_preds, -1, -1).log()   # Left shape: (num_query, num_gt, 1)

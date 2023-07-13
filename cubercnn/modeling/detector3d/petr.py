@@ -3,6 +3,7 @@ import cv2
 import copy
 import math
 import numpy as np
+import matplotlib.pyplot as plt
 
 import torch
 from torch import nn
@@ -13,6 +14,7 @@ import torchvision
 from pytorch3d.transforms import rotation_6d_to_matrix
 from pytorch3d.transforms.so3 import so3_relative_angle
 from detectron2.structures import Instances, Boxes
+from mmcv.runner.base_module import BaseModule
 
 from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn import Conv2d, Linear, build_activation_layer, bias_init_with_prob
@@ -33,8 +35,9 @@ from cubercnn import util as cubercnn_util
 from cubercnn.modeling.detector3d.detr_transformer import build_detr_transformer
 from cubercnn.util.util import box_cxcywh_to_xyxy, generalized_box_iou 
 from cubercnn.util.math_util import get_cuboid_verts
+from voxel_pooling.voxel_pooling_train import voxel_pooling_train
 
-class DETECTOR_PETR(nn.Module):
+class DETECTOR_PETR(BaseModule):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
@@ -48,7 +51,7 @@ class DETECTOR_PETR(nn.Module):
         else:
             self.grid_mask = False
 
-        backbone_cfg = backbone_cfgs(cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME)
+        backbone_cfg = backbone_cfgs(cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME, cfg)
         if 'EVA' in cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME:
             assert len(cfg.INPUT.RESIZE_TGT_SIZE) == 2
             assert cfg.INPUT.RESIZE_TGT_SIZE[0] == cfg.INPUT.RESIZE_TGT_SIZE[1]
@@ -58,7 +61,7 @@ class DETECTOR_PETR(nn.Module):
         self.img_backbone.init_weights()
 
         if cfg.MODEL.DETECTOR3D.PETR.USE_NECK:
-            neck_cfg = neck_cfgs(cfg.MODEL.DETECTOR3D.PETR.NECK_NAME)
+            neck_cfg = neck_cfgs(cfg.MODEL.DETECTOR3D.PETR.NECK_NAME, cfg)
             self.img_neck = build_neck(neck_cfg)
             petr_head_inchannel = neck_cfg['out_channels']
         else:
@@ -81,7 +84,6 @@ class DETECTOR_PETR(nn.Module):
             feat_h, feat_w = self.cfg.INPUT.RESIZE_TGT_SIZE[0] // patch_size, self.cfg.INPUT.RESIZE_TGT_SIZE[1] // patch_size
             feat = backbone_feat_list
             feat = feat.permute(0, 2, 1).reshape(feat.shape[0], -1, feat_h, feat_w).contiguous() # Left shape: (B, C, H, W)
-
         return feat
 
     def forward(self, images, batched_inputs, glip_results, class_name_emb, glip_text_emb, glip_visual_emb):
@@ -149,7 +151,7 @@ class DETECTOR_PETR(nn.Module):
 
         return masks
 
-def backbone_cfgs(backbone_name):
+def backbone_cfgs(backbone_name, cfg):
     cfgs = dict(
         ResNet50 = dict(
             type='ResNet',
@@ -171,7 +173,7 @@ def backbone_cfgs(backbone_name):
             norm_eval=False,
             frozen_stages=-1,
             input_ch=3,
-            out_features=('stage4','stage5',),
+            out_features=('stage4', 'stage5'), #('stage3', 'stage4', 'stage5'),
             pretrained = 'MODEL/fcos3d_vovnet_imgbackbone_omni3d.pth',
         ),
         EVA_Base = dict(
@@ -190,7 +192,7 @@ def backbone_cfgs(backbone_name):
 
     return cfgs[backbone_name]
 
-def neck_cfgs(neck_name):
+def neck_cfgs(neck_name, cfg):
     cfgs = dict(
         CPFPN_Res50 = dict(
             type='CPFPN',
@@ -200,6 +202,7 @@ def neck_cfgs(neck_name):
         ),
         CPFPN_VoV = dict(
             type='CPFPN',
+            #in_channels=[512, 768, 1024],
             in_channels=[768, 1024],
             out_channels=256,
             num_outs=2,
@@ -208,49 +211,22 @@ def neck_cfgs(neck_name):
 
     return cfgs[neck_name]
 
-def transformer_cfgs(transformer_name):
+def transformer_cfgs(transformer_name, cfg):
     cfgs = dict(
-        PETR_TRANSFORMER = dict(
-            type='PETRTransformer',
-            decoder=dict(
-                type='PETRTransformerDecoder',
-                return_intermediate=True,
-                num_layers=6,
-                transformerlayers=dict(
-                    type='PETRTransformerDecoderLayer',
-                    attn_cfgs=[
-                        dict(
-                            type='MultiheadAttention',
-                            embed_dims=256,
-                            num_heads=8,
-                            dropout=0.1),
-                        dict(
-                            type='PETRMultiheadFlashAttention',
-                            #type='PETRMultiheadAttention',
-                            embed_dims=256,
-                            num_heads=8,
-                            dropout=0.1),
-                        ],
-                    feedforward_channels=2048,
-                    ffn_dropout=0.1,
-                    operation_order=('self_attn', 'norm', 'cross_attn', 'norm',
-                                     'ffn', 'norm')),
-            )
-        ),
         DETR_TRANSFORMER = dict(
             hidden_dim=256,
             dropout=0.1, 
             nheads=8,
             dim_feedforward=2048,
-            enc_layers=0,
-            dec_layers=6,
+            enc_layers=cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_NUM,
+            dec_layers=cfg.MODEL.DETECTOR3D.PETR.HEAD.DEC_NUM,
             pre_norm=False,
         ),
     )
 
     return cfgs[transformer_name]
 
-def matcher_cfgs(matcher_name):
+def matcher_cfgs(matcher_name, cfg):
     cfgs = dict(
         HungarianAssigner3D = dict(
             type='HungarianAssigner3D',
@@ -274,30 +250,38 @@ class PETR_HEAD(nn.Module):
         self.random_init_query_num = self.num_query - self.glip_out_num
         assert self.random_init_query_num >= 0
 
-        self.LID = cfg.MODEL.DETECTOR3D.PETR.DEPTH_LID
-        self.depth_num = 64
+        self.downsample_factor = 16
+        self.position_range = [-65, 65, -25, 40, 0.0, 220]  # (x_min, x_max, y_min, y_max, z_min, z_max). x: right, y: down, z: inwards
+        self.x_bound = [self.position_range[0], self.position_range[1], 2.0]
+        self.y_bound = [self.position_range[2], self.position_range[3], self.position_range[3] - self.position_range[2]]
+        self.z_bound = [self.position_range[4], self.position_range[5], 2.0]
+        self.d_bound = [0.1, 230.0, 1.8]
+
         self.embed_dims = 256
         self.lang_dims = cfg.MODEL.GLIP_MODEL.MODEL.LANGUAGE_BACKBONE.LANG_DIM
+        self.depth_num = 64
         self.position_dim = 3 * self.depth_num
-        self.position_range = [-65, 65, -25, 40, 0, 220]  # (x_min, x_max, y_min, y_max, z_min, z_max). x: right, y: down, z: inwards
         self.uncern_range = cfg.MODEL.DETECTOR3D.PETR.HEAD.UNCERN_RANGE
 
         self.input_proj = Conv2d(self.in_channels, self.embed_dims, kernel_size=1)
-        
-        # 3D position coding head
-        self.position_encoder = nn.Sequential(
-            nn.Conv2d(self.position_dim, self.embed_dims*4, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(self.embed_dims*4, self.embed_dims, kernel_size=1, stride=1, padding=0),
-        )
 
-        if cfg.MODEL.DETECTOR3D.PETR.PE_2D:
-            self.pos_2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
-            self.pos_2d_encoder = nn.Sequential(
-                nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
-                nn.ReLU(),
-                nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
-            )
+        self.register_buffer('voxel_size', torch.Tensor([row[2] for row in [self.x_bound, self.y_bound, self.z_bound]]))
+        self.register_buffer('voxel_coord', torch.Tensor([row[0] + row[2] / 2.0 for row in [self.x_bound, self.y_bound, self.z_bound]]))
+        self.register_buffer('voxel_num', torch.LongTensor([(row[1] - row[0]) / row[2]for row in [self.x_bound, self.y_bound, self.z_bound]]))
+        self.register_buffer('frustum', self.create_frustum())
+        self.depth_channels, _, _, _ = self.frustum.shape
+
+        self.pos2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
+        self.cam_pos2d_encoder = nn.Sequential(
+            nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+        )
+        self.bev_pos2d_encoder = nn.Sequential(
+            nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+        )
 
         # Generating query heads
         self.lang_dim = cfg.MODEL.GLIP_MODEL.MODEL.LANGUAGE_BACKBONE.LANG_DIM
@@ -324,11 +308,9 @@ class PETR_HEAD(nn.Module):
             )
 
         # Transformer
-        transformer_cfg = transformer_cfgs(cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME)
+        transformer_cfg = transformer_cfgs(cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME, cfg)
         transformer_cfg['cfg'] = cfg
-        if cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'PETR_TRANSFORMER':
-            self.transformer = build_transformer(transformer_cfg)
-        elif cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DETR_TRANSFORMER':
+        if cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DETR_TRANSFORMER':
             self.transformer = build_detr_transformer(**transformer_cfg)
         self.num_decoder = 6    # Keep this variable consistent with the detr configs.
         
@@ -379,7 +361,7 @@ class PETR_HEAD(nn.Module):
         self.det2d_l1_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.DET_2D_L1_WEIGHT
         self.det2d_iou_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.DET_2D_GIOU_WEIGHT
         
-        matcher_cfg = matcher_cfgs(cfg.MODEL.DETECTOR3D.PETR.MATCHER_NAME)
+        matcher_cfg = matcher_cfgs(cfg.MODEL.DETECTOR3D.PETR.MATCHER_NAME, cfg)
         matcher_cfg.update(dict(total_cls_num = self.total_cls_num, 
                                 cls_weight = self.cls_weight, 
                                 reg_weight = self.reg_weight,
@@ -429,49 +411,6 @@ class PETR_HEAD(nn.Module):
         if self.random_init_query_num > 0:
             nn.init.uniform_(self.reference_points.weight.data, 0, 1)
 
-    def produce_coords_d(self):
-        if self.LID:
-            index = torch.arange(start=0, end=self.depth_num, step=1).cuda().float()
-            index_1 = index + 1
-            bin_size = (self.position_range[5] - self.position_range[4]) / (self.depth_num * (1 + self.depth_num))
-            coords_d = self.position_range[4] + bin_size * index * index_1
-        else:
-            index = torch.arange(start=0, end=self.depth_num, step=1).cuda().float()
-            bin_size = (self.position_range[5] - self.position_range[4]) / self.depth_num
-            coords_d = self.position_range[4] + bin_size * index
-
-        return coords_d
-
-    def position_embeding(self, feat, coords_d, Ks, masks, pad_img_resolution, glip_feat_flag = False):
-        eps = 1e-5
-        pad_w, pad_h = pad_img_resolution
-        B, _, H, W = feat.shape
-        coords_h = torch.arange(H, device=feat.device).float() * pad_h / H
-        coords_w = torch.arange(W, device=feat.device).float() * pad_w / W
-        
-        D = coords_d.shape[0]
-        coords = torch.stack(torch.meshgrid([coords_w, coords_h, coords_d])).permute(1, 2, 3, 0) # W, H, D, 3
-        coords[..., :2] = coords[..., :2] * torch.maximum(coords[..., 2:3], torch.ones_like(coords[..., 2:3])*eps)  # Last dimension format (u*d, v*d, d)
-        coords = coords[None].repeat(B, 1, 1, 1, 1)[..., None] # Left shape: (B, w, h, d, 3, 1)
-        inv_Ks = Ks.inverse()[:, None, None, None]   # Left shape: (B, 1, 1, 1, 3, 3)
-        cam_coords = (inv_Ks @ coords).squeeze(-1)    # cam_coords: Coordinates in the camera view coordinate system. Shape: (B, w, h, d, 3)
-
-        cam_coords[..., 0:1] = (cam_coords[..., 0:1] - self.position_range[0]) / (self.position_range[1] - self.position_range[0])
-        cam_coords[..., 1:2] = (cam_coords[..., 1:2] - self.position_range[2]) / (self.position_range[3] - self.position_range[2])
-        cam_coords[..., 2:3] = (cam_coords[..., 2:3] - self.position_range[4]) / (self.position_range[5] - self.position_range[4])
-        invalid_coords_mask = (cam_coords > 1.0) | (cam_coords < 0.0)   # Left shape: (B, w, h, d, 3)
-
-        invalid_coords_mask = invalid_coords_mask.flatten(-2).sum(-1) > (D * 0.5)   # Left shape: (B, w, h)
-        invalid_coords_mask = masks | invalid_coords_mask.permute(0, 2, 1)  # Left shape: (B, h, w)
-        cam_coords = cam_coords.permute(0, 3, 4, 2, 1).contiguous().view(B, -1, H, W)   # (B, D*3, H, W)
-        cam_coords = inverse_sigmoid(cam_coords)
-        if not glip_feat_flag:
-            coords_position_embeding = self.position_encoder(cam_coords)    # Left shape: (B, C, H, W)
-        else:
-            coords_position_embeding = self.glip_vision_position_encoder(cam_coords)
-        
-        return coords_position_embeding, invalid_coords_mask
-
     def box_2d_emb(self, glip_bbox, Ks, coords_d):
         '''
         Input:
@@ -491,9 +430,50 @@ class PETR_HEAD(nn.Module):
 
         return glip_bbox_emb
 
-    def forward(self, feat, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs, pad_img_resolution, glip_text_emb, glip_visual_emb):
+    def create_frustum(self):
+        ogfW, ogfH = self.cfg.INPUT.RESIZE_TGT_SIZE
+        fH, fW = ogfH // self.downsample_factor, ogfW // self.downsample_factor
+        d_coords = torch.arange(*self.d_bound, dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # Left shape: (D, H, W)
+        D, _, _ = d_coords.shape
+        x_coords = torch.linspace(0, ogfW - 1, fW, dtype=torch.float).view(1, 1, fW).expand(D, fH, fW)
+        y_coords = torch.linspace(0, ogfH - 1, fH, dtype=torch.float).view(1, fH, 1).expand(D, fH, fW)
+        frustum = torch.stack((x_coords, y_coords, d_coords), -1) # Left shape: (D, H, W, 3)
+        
+        return frustum
+
+    def get_geometry(self, Ks):
+        points = self.frustum   # Left shape: (D, H, W, 3)
+        points = torch.cat((points[..., :2] * points[..., 2:], points[..., 2:]), dim = -1)  # Left shape: (D, H, W, 3)
+        points = points[None].unsqueeze(-1)  # Left shape: (1, D, H, W, 3, 1)
+        Ks = Ks[:, None, None, None]    # Left shape: (B, 1, 1, 1, 3, 3)
+        points = (Ks.inverse() @ points).squeeze(-1)    # Left shape: (B, D, H, W, 3)
+        return points
+
+    def forward(self, feat, glip_results, class_name_emb, Ks, scale_ratios, img_mask, batched_inputs, pad_img_resolution, glip_text_emb, glip_visual_emb):
         feat = self.input_proj(feat) # Left shape: (B, C, feat_h, feat_w)
         B = feat.shape[0]
+        img_mask = F.interpolate(img_mask[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
+
+        cam_feat_pos = self.pos2d_generator(img_mask) # Left shape: (B, C, H, W)
+        cam_feat_pos = self.cam_pos2d_encoder(cam_feat_pos)
+        feat = feat + cam_feat_pos  # Left shape: (B, C, H, W)
+
+        geom_xyz = self.get_geometry(Ks)    # Left shape: (B, D, H, W, 3)
+        geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
+        geom_xyz[img_mask[:, None, :, :, None].expand_as(geom_xyz)] = -1   # Block feature from invalid image region.
+        feat_with_depth = feat.unsqueeze(2).expand(-1, -1, self.depth_channels, -1, -1) / self.depth_channels   # Left shape: (B, C, D, H, W)
+        feat_with_depth = feat_with_depth.permute(0, 2, 3, 4, 1)    # Left shape: (B, D, H, W, C)
+        # Notably, the BEV feature shape should be (B, C bev_z, bev_x) rather than (B, C bev_y, bev_x).
+        bev_feat = voxel_pooling_train(geom_xyz.contiguous(), feat_with_depth.contiguous(), self.voxel_num.cuda())   # Left shape: (B, C, bev_z, bev_x)
+        bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
+        bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
+        bev_feat_pos = self.bev_pos2d_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
+
+        # For vis
+        '''vis_bev_feat = bev_feat[0].mean(0).detach().cpu().numpy()
+        plt.imshow(vis_bev_feat, cmap = 'magma_r')
+        plt.savefig('vis.png')
+        pdb.set_trace()'''
         
         # Prepare the class name embedding following the operations in GLIP.
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.OV_CLS_HEAD:
@@ -501,13 +481,6 @@ class PETR_HEAD(nn.Module):
             class_name_emb = F.normalize(class_name_emb, p=2, dim=-1)
             dot_product_proj_tokens = self.dot_product_projection_text(class_name_emb / 2.0) # Left shape: (cls_num, L)
             dot_product_proj_tokens_bias = torch.matmul(class_name_emb, self.bias_lang) + self.bias0 # Left shape: (cls_num)
-
-        masks = F.interpolate(masks[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
-        coords_d = self.produce_coords_d()
-        pos_embed, _ = self.position_embeding(feat, coords_d, Ks, masks, pad_img_resolution)  # Left shape: (B, C, feat_h, feat_w)
-        if self.cfg.MODEL.DETECTOR3D.PETR.PE_2D:
-            pos_2d_embed = self.pos_2d_generator(masks) # Left shape: (B, C, H, W)
-            pos_embed = pos_embed + pos_2d_embed
 
         if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
             glip_bbox_emb = self.box_2d_emb(glip_results['bbox'], Ks, coords_d) # Left shape: (B, num_box, L)
@@ -545,7 +518,7 @@ class PETR_HEAD(nn.Module):
         else:
             glip_visual_feat, glip_pos_embed, glip_text_feat = None, None, None
         
-        outs_dec, _ = self.transformer(feat, masks, query_embeds, pos_embed, self.reg_branches, batched_inputs, \
+        outs_dec, _ = self.transformer(bev_feat, bev_mask, query_embeds, bev_feat_pos, self.reg_branches, batched_inputs, \
             glip_visual_feat = glip_visual_feat, glip_pos_embed = glip_pos_embed, glip_text_feat = glip_text_feat) # Left shape: (num_layers, bs, num_query, dim)
         outs_dec = torch.nan_to_num(outs_dec)
 
@@ -569,20 +542,13 @@ class PETR_HEAD(nn.Module):
         outputs_classes = torch.stack(outputs_classes, dim = 0)
         outputs_regs = torch.stack(outputs_regs, dim = 0)
         
-        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'xyz':
-            outputs_regs[..., self.reg_key_manager('loc')] = outputs_regs[..., self.reg_key_manager('loc')].sigmoid()
-            outputs_regs[..., self.reg_key_manager('loc')][..., 0] = outputs_regs[..., self.reg_key_manager('loc')][..., 0] * \
-                (self.position_range[1] - self.position_range[0]) + self.position_range[0]
-            outputs_regs[..., self.reg_key_manager('loc')][..., 1] = outputs_regs[..., self.reg_key_manager('loc')][..., 1] * \
-                (self.position_range[3] - self.position_range[2]) + self.position_range[2]
-            outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
-                (self.position_range[5] - self.position_range[4]) + self.position_range[4]
-        elif self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'uvd':
-            outputs_regs[..., self.reg_key_manager('loc')] = outputs_regs[..., self.reg_key_manager('loc')].sigmoid()
-            outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
-                (self.position_range[5] - self.position_range[4]) + self.position_range[4]  # depth
-        else:
-            raise Exception("Unsupported loc_mode: {}".format(self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE))
+        outputs_regs[..., self.reg_key_manager('loc')] = outputs_regs[..., self.reg_key_manager('loc')].sigmoid()
+        outputs_regs[..., self.reg_key_manager('loc')][..., 0] = outputs_regs[..., self.reg_key_manager('loc')][..., 0] * \
+            (self.position_range[1] - self.position_range[0]) + self.position_range[0]
+        outputs_regs[..., self.reg_key_manager('loc')][..., 1] = outputs_regs[..., self.reg_key_manager('loc')][..., 1] * \
+            (self.position_range[3] - self.position_range[2]) + self.position_range[2]
+        outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
+            (self.position_range[5] - self.position_range[4]) + self.position_range[4]
 
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
             outputs_regs[..., self.reg_key_manager('det2d_xywh')] = outputs_regs[..., self.reg_key_manager('det2d_xywh')].sigmoid()
@@ -727,8 +693,6 @@ class PETR_HEAD(nn.Module):
         loss_dict = {'cls_loss_{}'.format(dec_idx): 0, 'loc_loss_{}'.format(dec_idx): 0, 'dim_loss_{}'.format(dec_idx): 0, 'pose_loss_{}'.format(dec_idx): 0}
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
             loss_dict.update({'det2d_reg_loss_{}'.format(dec_idx): 0, 'det2d_iou_loss_{}'.format(dec_idx): 0})
-        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'uvd':
-            loss_dict.update({'loc_uv_loss_{}'.format(dec_idx): 0, 'loc_d_loss_{}'.format(dec_idx): 0})
 
         num_pos = 0
         for bs, (pred_idxs, gt_idxs) in enumerate(assign_results):
@@ -746,17 +710,6 @@ class PETR_HEAD(nn.Module):
             bs_loc_gts = bs_gt_instance.get('gt_boxes3D')[..., 6:9].to(device)[gt_idxs] # Left shape: (num_gt, 3)
             bs_dim_gts = bs_gt_instance.get('gt_boxes3D')[..., 3:6].to(device)[gt_idxs] # Left shape: (num_gt, 3)
             bs_pose_gts = bs_gt_instance.get('gt_poses').to(device)[gt_idxs] # Left shape: (num_gt, 3, 3)
-            if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'uvd':
-                bs_uvd_gts = bs_gt_instance.get('gt_boxes3D')[..., 0:3].to(device)[gt_idxs] # Left shape: (num_gt, 3)
-                bs_uvd_gts[:, :2] = bs_uvd_gts[:, :2] / ori_img_resolution[bs][None]
-                if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.VIRTUAL_DEPTH:
-                    virtual_focal_y = self.cfg.MODEL.DETECTOR3D.PETR.HEAD.VIRTUAL_FOCAL_Y
-                    augmented_focal_y = Ks_list[bs][1][1]
-                    bs_uvd_gts[:, 2:3] = bs_uvd_gts[:, 2:3] / h_scale_ratios[bs] * virtual_focal_y / augmented_focal_y
-                    
-                bs_loc_xyz_preds = bs_loc_preds.clone() # Left shape: (num_gt, 3)
-                bs_loc_xyz_preds = torch.cat((bs_loc_xyz_preds[:, :2] * bs_loc_xyz_preds[:, 2:3], bs_loc_xyz_preds[:, 2:3]), dim = 1)
-                bs_loc_xyz_preds = (Ks_list[bs].inverse().unsqueeze(0) @ bs_loc_xyz_preds.unsqueeze(-1)).squeeze(-1)    # Left shape: (num_gt, 3)
 
             if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
                 bs_det2d_xywh_preds = bs_bbox_preds[..., self.reg_key_manager('det2d_xywh')]   # Left shape: (num_query, 4)
@@ -796,15 +749,8 @@ class PETR_HEAD(nn.Module):
             loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * torchvision.ops.sigmoid_focal_loss(bs_cls_scores, bs_cls_gts_onehot.float(), reduction = 'none').sum()
             
             # Localization loss
-            if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'xyz':
-                loss_dict['loc_loss_{}'.format(dec_idx)] += self.reg_weight * (math.sqrt(2) * self.reg_loss(bs_loc_preds, bs_loc_gts)\
-                                                            .sum(-1, keepdim=True) / bs_uncern_preds.exp() + bs_uncern_preds).sum()
-            elif self.cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_MODE == 'uvd':
-                loss_dict['loc_uv_loss_{}'.format(dec_idx)] += self.det2d_l1_weight * self.reg_loss(bs_loc_preds[:, :2], bs_uvd_gts[:, :2]).sum()
-                loss_dict['loc_d_loss_{}'.format(dec_idx)] += self.reg_weight * self.reg_loss(bs_loc_preds[:, 2:3], bs_uvd_gts[:, 2:3]).sum()
-                
-                loss_dict['loc_loss_{}'.format(dec_idx)] += self.reg_weight * (math.sqrt(2) * self.reg_loss(bs_loc_xyz_preds, bs_loc_gts)\
-                                                            .sum(-1, keepdim=True) / bs_uncern_preds.exp() + bs_uncern_preds).sum()
+            loss_dict['loc_loss_{}'.format(dec_idx)] += self.reg_weight * (math.sqrt(2) * self.reg_loss(bs_loc_preds, bs_loc_gts)\
+                                                        .sum(-1, keepdim=True) / bs_uncern_preds.exp() + bs_uncern_preds).sum()
             
             # Dimension loss
             loss_dict['dim_loss_{}'.format(dec_idx)] += self.reg_weight * self.reg_loss(bs_dim_preds, bs_dim_gts.log()).sum()
