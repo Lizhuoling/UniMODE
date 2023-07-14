@@ -1,4 +1,4 @@
-exp_id=OV_base2_omni3d_out_vov_resize_flip
+exp_id=BEVglobal_base1_omni3d_out_vov
 
 CUDA_VISIBLE_DEVICES=3 python tools/train_net.py \
   --eval-only \

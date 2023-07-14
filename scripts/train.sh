@@ -1,9 +1,9 @@
-exp_id=BEVglobal_base1_omni3d_out_vov_bbfp16
+exp_id=BEVglobal_base2_omni3d_out_vov_globalhead
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
   --num-gpus 4 \
-  --dist-url tcp://127.0.0.1:12346 \
+  --dist-url tcp://127.0.0.1:12345 \
   OUTPUT_DIR output/$exp_id \
   #--resume \
   #MODEL.WEIGHTS_PRETRAIN output/OV_base2_omni3d_out_vov_visualfuse_loadpretrained/model_recent.pth
