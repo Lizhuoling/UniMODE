@@ -45,7 +45,7 @@ MODEL:
       BACKBONE_NAME: 'VoVNet'
       BACKBONE_FP16: True
       NECK_NAME: 'SECONDFPN'
-      TRANSFORMER_NAME: 'DETR_TRANSFORMER'
+      TRANSFORMER_NAME: 'DEFORMABLE_TRANSFORMER'
       MATCHER_NAME: 'HungarianAssigner3D'
       NUM_QUERY: 200
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
@@ -60,7 +60,7 @@ MODEL:
         DET_2D_L1_WEIGHT: 5.0
         DET_2D_GIOU_WEIGHT: 2.0
 
-        ENC_NUM: 0
+        ENC_NUM: 1
         DEC_NUM: 6
 
         POSITION_RANGE: [-60, 60, -20, 35, 0, 80]

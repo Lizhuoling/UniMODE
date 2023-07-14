@@ -34,6 +34,7 @@ from cubercnn.util.util import Converter_key2channel
 from cubercnn.util import torch_dist
 from cubercnn import util as cubercnn_util
 from cubercnn.modeling.detector3d.detr_transformer import build_detr_transformer
+from cubercnn.modeling.detector3d.deformable_detr import build_deformable_transformer
 from cubercnn.util.util import box_cxcywh_to_xyxy, generalized_box_iou 
 from cubercnn.util.math_util import get_cuboid_verts
 from cubercnn.modeling.detector3d.depthnet import DepthNet
@@ -72,7 +73,7 @@ class DETECTOR_PETR(BaseModule):
                 petr_head_inchannel = neck_cfg['out_channels']
         else:
             petr_head_inchannel = self.img_backbone.embed_dim
-
+        
         self.petr_head = PETR_HEAD(cfg, in_channels = petr_head_inchannel)
 
     @auto_fp16(apply_to=('imgs'), out_fp32=True)
@@ -96,7 +97,7 @@ class DETECTOR_PETR(BaseModule):
         Ks, scale_ratios = self.transform_intrinsics(images, batched_inputs)    # Transform the camera intrsincis based on input image augmentations.
         masks = self.generate_mask(images)  # Generate image mask for detr. masks shape: (b, h, w)
         pad_img_resolution = (images.tensor.shape[3],images.tensor.shape[2])
-        ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # (B, 2), with first then height
+        ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # (B, 2), width first then height
         
         # Visualize 3D gt centers using intrisics
         '''from cubercnn.vis.vis import draw_3d_box
@@ -119,7 +120,13 @@ class DETECTOR_PETR(BaseModule):
         pdb.set_trace()'''
         
         feat = self.extract_feat(imgs = images.tensor, batched_inputs = batched_inputs)
-        petr_outs = self.petr_head(feat, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs, pad_img_resolution, glip_text_emb, glip_visual_emb)
+        
+        petr_outs = self.petr_head(feat, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs,
+            pad_img_resolution = pad_img_resolution, 
+            ori_img_resolution = ori_img_resolution, 
+            glip_text_emb = glip_text_emb, 
+            glip_visual_emb = glip_visual_emb,
+        )
         
         return petr_outs
 
@@ -179,7 +186,7 @@ def backbone_cfgs(backbone_name, cfg):
             norm_eval=False,
             frozen_stages=-1,
             input_ch=3,
-            out_features=('stage2', 'stage3', 'stage4', 'stage5'), #('stage3', 'stage4', 'stage5'),
+            out_features=cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS, #('stage3', 'stage4', 'stage5'),
             pretrained = 'MODEL/fcos3d_vovnet_imgbackbone_omni3d.pth',
         ),
         EVA_Base = dict(
@@ -208,10 +215,9 @@ def neck_cfgs(neck_name, cfg):
         ),
         CPFPN_VoV = dict(
             type='CPFPN',
-            #in_channels=[512, 768, 1024],
-            in_channels=[768, 1024],
+            in_channels=[512, 768, 1024],
             out_channels=256,
-            num_outs=2,
+            num_outs=len(cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS),
         ),
         SECONDFPN = dict(
             type='SECONDFPN',
@@ -234,6 +240,23 @@ def transformer_cfgs(transformer_name, cfg):
             dec_layers=cfg.MODEL.DETECTOR3D.PETR.HEAD.DEC_NUM,
             pre_norm=False,
         ),
+        DEFORMABLE_TRANSFORMER = dict(
+            d_model = 256,
+            nhead = 8,
+            num_encoder_layers = cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_NUM,
+            num_decoder_layers = cfg.MODEL.DETECTOR3D.PETR.HEAD.DEC_NUM,
+            dim_feedforward = 512,
+            dropout = 0.1,
+            activation = "relu",
+            return_intermediate_dec=True,
+            num_feature_levels=1,   # Sample on the BEV feature.
+            dec_n_points=4,
+            enc_n_points=4,
+            two_stage=False,
+            two_stage_num_proposals=cfg.MODEL.DETECTOR3D.PETR.NUM_QUERY,
+            use_dab=False,
+            cfg = cfg,
+        ),
     )
 
     return cfgs[transformer_name]
@@ -255,14 +278,8 @@ class PETR_HEAD(nn.Module):
 
         self.total_cls_num = len(cfg.DATASETS.CATEGORY_NAMES)
         self.num_query = cfg.MODEL.DETECTOR3D.PETR.NUM_QUERY
-        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
-            self.glip_out_num = cfg.MODEL.GLIP_MODEL.MODEL.ATSS.DETECTIONS_PER_IMG
-        else:
-            self.glip_out_num = 0
-        self.random_init_query_num = self.num_query - self.glip_out_num
-        assert self.random_init_query_num >= 0
 
-        self.downsample_factor = 16
+        self.downsample_factor = cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR
         self.position_range = cfg.MODEL.DETECTOR3D.PETR.HEAD.POSITION_RANGE  # (x_min, x_max, y_min, y_max, z_min, z_max). x: right, y: down, z: inwards
         self.x_bound = [self.position_range[0], self.position_range[1], cfg.MODEL.DETECTOR3D.PETR.HEAD.GRID_SIZE[0]]
         self.y_bound = [self.position_range[2], self.position_range[3], cfg.MODEL.DETECTOR3D.PETR.HEAD.GRID_SIZE[1]]
@@ -280,13 +297,8 @@ class PETR_HEAD(nn.Module):
         self.register_buffer('voxel_num', torch.LongTensor([(row[1] - row[0]) / row[2]for row in [self.x_bound, self.y_bound, self.z_bound]]))
         self.register_buffer('frustum', self.create_frustum())
         self.depth_channels, _, _, _ = self.frustum.shape
-
+        
         self.pos2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
-        '''self.cam_pos2d_encoder = nn.Sequential(
-            nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
-        )'''
         self.bev_pos2d_encoder = nn.Sequential(
             nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
             nn.ReLU(),
@@ -298,32 +310,34 @@ class PETR_HEAD(nn.Module):
         # Generating query heads
         self.lang_dim = cfg.MODEL.GLIP_MODEL.MODEL.LANGUAGE_BACKBONE.LANG_DIM
         if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
-            self.pos_conf_mlp = nn.Sequential(
-                    nn.Linear(5, self.embed_dims),
-                    nn.ReLU(),
-                    nn.Linear(self.embed_dims, self.embed_dims),
-                )
             self.glip_cls_emb_mlp = nn.Linear(self.lang_dim, self.embed_dims)
-            self.glip_pos_emb_mlp = nn.Sequential(
-                    nn.Linear(self.depth_num * 6, self.embed_dims),
-                    nn.ReLU(),
-                    nn.Linear(self.embed_dims, self.embed_dims),
-                )
-            self.glip_conf_emb = nn.Linear(1, self.embed_dims)
-        if self.random_init_query_num > 0:
-            self.reference_points = nn.Embedding(self.random_init_query_num, 3)
-            self.unknown_cls_emb = nn.Embedding(1, self.embed_dims)
-            self.query_embedding = nn.Sequential(
-                nn.Linear(self.embed_dims*3//2, self.embed_dims),
+            self.glip_center_emb_mlp = nn.Sequential(
+                nn.Linear(self.embed_dims, self.embed_dims),
                 nn.ReLU(),
                 nn.Linear(self.embed_dims, self.embed_dims),
             )
+            self.glip_box_emb_mlp = nn.Sequential(
+                nn.Linear(2 * self.embed_dims, self.embed_dims),
+                nn.ReLU(),
+                nn.Linear(self.embed_dims, self.embed_dims),
+            )
+            self.glip_conf_emb = nn.Linear(1, self.embed_dims)
+
+        self.reference_points = nn.Embedding(self.num_query, 3)
+        self.query_embedding = nn.Sequential(
+            nn.Linear(self.embed_dims*3//2, self.embed_dims),
+            nn.ReLU(),
+            nn.Linear(self.embed_dims, self.embed_dims),
+        )
 
         # Transformer
         transformer_cfg = transformer_cfgs(cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME, cfg)
         transformer_cfg['cfg'] = cfg
         if cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DETR_TRANSFORMER':
             self.transformer = build_detr_transformer(**transformer_cfg)
+        elif cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DEFORMABLE_TRANSFORMER':
+            self.tgt_embed = nn.Embedding(self.num_query, self.embed_dims)
+            self.transformer = build_deformable_transformer(**transformer_cfg)
         self.num_decoder = 6    # Keep this variable consistent with the detr configs.
         
         # Classification head
@@ -417,8 +431,8 @@ class PETR_HEAD(nn.Module):
         if self.cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'PETR_TRANSFORMER':
             self.transformer.init_weights()
 
-        if self.random_init_query_num > 0:
-            nn.init.uniform_(self.reference_points.weight.data, 0, 1)
+        nn.init.uniform_(self.reference_points.weight.data, 0, 1)
+        self.reference_points.weight.requires_grad = False
 
     def box_2d_emb(self, glip_bbox, Ks, coords_d):
         '''
@@ -458,7 +472,7 @@ class PETR_HEAD(nn.Module):
         points = (Ks.inverse() @ points).squeeze(-1)    # Left shape: (B, D, H, W, 3)
         return points
 
-    def forward(self, feat, glip_results, class_name_emb, Ks, scale_ratios, img_mask, batched_inputs, pad_img_resolution, glip_text_emb, glip_visual_emb):
+    def forward(self, feat, glip_results, class_name_emb, Ks, scale_ratios, img_mask, batched_inputs, pad_img_resolution, ori_img_resolution, glip_text_emb, glip_visual_emb):
         B = feat.shape[0]
         img_mask = F.interpolate(img_mask[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
 
@@ -491,17 +505,15 @@ class PETR_HEAD(nn.Module):
             dot_product_proj_tokens_bias = torch.matmul(class_name_emb, self.bias_lang) + self.bias0 # Left shape: (cls_num)
 
         if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
+            cat_ori_img_resolution = torch.cat((ori_img_resolution, ori_img_resolution), dim = -1).unsqueeze(1) # Left shape: (B, 1, 4)
+            glip_results_relative_bbox = glip_results['bbox'] / cat_ori_img_resolution  # Left shape: (B, num_box, 4)
+            glip_center_emb = self.glip_center_emb_mlp(pos2posemb(reference_points))
             glip_bbox_emb = self.box_2d_emb(glip_results['bbox'], Ks, coords_d) # Left shape: (B, num_box, L)
             glip_cls_emb = self.glip_cls_emb_mlp(glip_results['cls_emb'])  # Left shape: (B, num_box, L)
             glip_score_emb = self.glip_conf_emb(glip_results['scores'].unsqueeze(-1))   # Left shape: (B, num_box, L) 
-            query_embeds = glip_bbox_emb + glip_cls_emb + glip_score_emb    # Left shape: (B, num_box, L) 
-        else:
-            query_embeds = feat.new_zeros(B, 0, self.embed_dims)
-        if self.random_init_query_num > 0:
-            random_reference_points = self.reference_points.weight
-            random_query_embeds = self.query_embedding(pos2posemb3d(random_reference_points))
-            random_query_embeds = random_query_embeds + self.unknown_cls_emb.weight # Left shape: (num_random_box, L) 
-            query_embeds = torch.cat((query_embeds, random_query_embeds.unsqueeze(0).expand(B, -1, -1)), dim = 1)   # Left shape: (B, num_query, L)
+
+        reference_points = self.reference_points.weight[None].expand(B, -1, -1)  # Left shape: (B, num_query, 3) 
+        query_embeds = self.query_embedding(pos2posemb3d(reference_points))   # Left shape: (B, num_query, L) 
 
         if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'vision':
             glip_visual_feat =  glip_visual_emb[self.cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL]
@@ -521,8 +533,16 @@ class PETR_HEAD(nn.Module):
         else:
             glip_visual_feat, glip_pos_embed, glip_text_feat = None, None, None
         
-        outs_dec, _ = self.transformer(bev_feat, bev_mask, query_embeds, bev_feat_pos, self.reg_branches, batched_inputs, \
-            glip_visual_feat = glip_visual_feat, glip_pos_embed = glip_pos_embed, glip_text_feat = glip_text_feat) # Left shape: (num_layers, bs, num_query, dim)
+        if self.cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DETR_TRANSFORMER':
+            outs_dec, _ = self.transformer(bev_feat, bev_mask, query_embeds, bev_feat_pos, self.reg_branches, batched_inputs, \
+                glip_visual_feat = glip_visual_feat, glip_pos_embed = glip_pos_embed, glip_text_feat = glip_text_feat) # Left shape: (num_layers, bs, num_query, dim)
+        elif self.cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DEFORMABLE_TRANSFORMER':
+            tgt = self.tgt_embed.weight[None].expand(B, -1, -1) # Left shape: (B, num_query, L)
+            query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
+
+            outs_dec, init_reference, inter_references, _, _ = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
+                reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution, glip_visual_feat = glip_visual_feat, glip_visual_pos_embed = glip_pos_embed, glip_text_feat = glip_text_feat)
+        
         outs_dec = torch.nan_to_num(outs_dec)
 
         outputs_classes = []

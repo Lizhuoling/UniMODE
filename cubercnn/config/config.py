@@ -55,6 +55,8 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION = 'none'  # 'vision' or 'language' or 'text' or 'none'
     cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL = 4
     cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION = 'after'  # before or after
+    cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS = ('stage2', 'stage3', 'stage4', 'stage5')
+    cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR = 16
 
     cfg.MODEL.DETECTOR3D.PETR.HEAD = CN()
     cfg.MODEL.DETECTOR3D.PETR.HEAD.OV_CLS_HEAD = True
