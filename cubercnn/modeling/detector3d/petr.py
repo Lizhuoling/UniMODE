@@ -311,13 +311,8 @@ class PETR_HEAD(nn.Module):
         self.lang_dim = cfg.MODEL.GLIP_MODEL.MODEL.LANGUAGE_BACKBONE.LANG_DIM
         if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
             self.glip_cls_emb_mlp = nn.Linear(self.lang_dim, self.embed_dims)
-            self.glip_center_emb_mlp = nn.Sequential(
-                nn.Linear(self.embed_dims, self.embed_dims),
-                nn.ReLU(),
-                nn.Linear(self.embed_dims, self.embed_dims),
-            )
             self.glip_box_emb_mlp = nn.Sequential(
-                nn.Linear(2 * self.embed_dims, self.embed_dims),
+                nn.Linear(6 * self.depth_channels, self.embed_dims),
                 nn.ReLU(),
                 nn.Linear(self.embed_dims, self.embed_dims),
             )
@@ -434,7 +429,7 @@ class PETR_HEAD(nn.Module):
         nn.init.uniform_(self.reference_points.weight.data, 0, 1)
         self.reference_points.weight.requires_grad = False
 
-    def box_2d_emb(self, glip_bbox, Ks, coords_d):
+    def box_2d_emb(self, glip_bbox, Ks):
         '''
         Input:
             glip_bbox: The 2d boxes produced by GLIP. shape: (B, num_box, 4)
@@ -442,14 +437,13 @@ class PETR_HEAD(nn.Module):
             coords_d: Candidate depth values. shape: (depth_bin,)
         '''
         B, num_box, _ = glip_bbox.shape
-        depth_bin = coords_d.shape[0]
-        glip_bbox  = glip_bbox.view(B, num_box, 1, 2, 2).expand(B, num_box, depth_bin, 2, 2)
-        glip_bbox_3d = torch.cat((glip_bbox, coords_d.view(1, 1, depth_bin, 1, 1).expand(B, num_box, depth_bin, 2, 1)), dim = -1).unsqueeze(-1) # Left shape: (B, num_box, depth_bin, 2, 3, 1)
-        inv_Ks = Ks.inverse()[:, None, None, None]  # Left shape: (B, 1, 1, 1, 3, 3)
-        glip_bbox_3d = (inv_Ks @ glip_bbox_3d).squeeze(-1)    # Left shape: (B, num_box, depth_bin, 2, 3)
-        glip_bbox_3d = glip_bbox_3d.view(B, num_box, -1)    # (B, num_box, depth_bin * 6)
-
-        glip_bbox_emb = self.glip_pos_emb_mlp(glip_bbox_3d) # Left shape: (B, num_box, emb_len)
+        d_coors = torch.arange(*self.d_bound, dtype=torch.float).view(1, 1, 1, -1, 1).expand(B, num_box, 2, -1, 1).to(glip_bbox.device)   # Left shape: (B, num_box, 2, D, 1)
+        D = d_coors.shape[-2]
+        glip_bbox = glip_bbox.view(B, num_box, 2, 1, 2).expand(-1, -1, -1, D, -1)   # Left shape: (B, num_box, 2, D, 2)
+        glip_bbox_3d = torch.cat((glip_bbox * d_coors, d_coors), dim = -1).unsqueeze(-1)  # Left shape: (B, num_box, 2, D, 3, 1)
+        Ks = Ks.view(B, 1, 1, 1, 3, 3)  # Left shape: (B, 1, 1, 1, 3, 3)
+        glip_bbox_3d = (Ks.inverse() @ glip_bbox_3d).view(B, num_box, 2 * D * 3)    # Left shape: (B, num_box, 6 * D)
+        glip_bbox_emb = self.glip_box_emb_mlp(glip_bbox_3d) # Left shape: (B, num_box, L)
 
         return glip_bbox_emb
 
@@ -504,16 +498,17 @@ class PETR_HEAD(nn.Module):
             dot_product_proj_tokens = self.dot_product_projection_text(class_name_emb / 2.0) # Left shape: (cls_num, L)
             dot_product_proj_tokens_bias = torch.matmul(class_name_emb, self.bias_lang) + self.bias0 # Left shape: (cls_num)
 
-        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
-            cat_ori_img_resolution = torch.cat((ori_img_resolution, ori_img_resolution), dim = -1).unsqueeze(1) # Left shape: (B, 1, 4)
-            glip_results_relative_bbox = glip_results['bbox'] / cat_ori_img_resolution  # Left shape: (B, num_box, 4)
-            glip_center_emb = self.glip_center_emb_mlp(pos2posemb(reference_points))
-            glip_bbox_emb = self.box_2d_emb(glip_results['bbox'], Ks, coords_d) # Left shape: (B, num_box, L)
-            glip_cls_emb = self.glip_cls_emb_mlp(glip_results['cls_emb'])  # Left shape: (B, num_box, L)
-            glip_score_emb = self.glip_conf_emb(glip_results['scores'].unsqueeze(-1))   # Left shape: (B, num_box, L) 
-
         reference_points = self.reference_points.weight[None].expand(B, -1, -1)  # Left shape: (B, num_query, 3) 
         query_embeds = self.query_embedding(pos2posemb3d(reference_points))   # Left shape: (B, num_query, L) 
+        tgt = self.tgt_embed.weight[None].expand(B, -1, -1) # Left shape: (B, num_query, L)
+
+        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
+            glip_bbox_emb = self.box_2d_emb(glip_results['bbox'], Ks) # Left shape: (B, num_box, L)
+            glip_cls_emb = self.glip_cls_emb_mlp(glip_results['cls_emb'])  # Left shape: (B, num_box, L)
+            glip_score_emb = self.glip_conf_emb(glip_results['scores'].unsqueeze(-1))   # Left shape: (B, num_box, L) 
+            glip_box_num = glip_bbox_emb.shape[1]
+            glip_initialized_tgt = tgt[:, :glip_box_num].clone() + glip_bbox_emb + glip_cls_emb + glip_score_emb
+            tgt = torch.cat((glip_initialized_tgt, tgt[:, glip_box_num:]), dim = 1) # Left shape: (B, num_query, L) 
 
         if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'vision':
             glip_visual_feat =  glip_visual_emb[self.cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL]
@@ -537,7 +532,6 @@ class PETR_HEAD(nn.Module):
             outs_dec, _ = self.transformer(bev_feat, bev_mask, query_embeds, bev_feat_pos, self.reg_branches, batched_inputs, \
                 glip_visual_feat = glip_visual_feat, glip_pos_embed = glip_pos_embed, glip_text_feat = glip_text_feat) # Left shape: (num_layers, bs, num_query, dim)
         elif self.cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DEFORMABLE_TRANSFORMER':
-            tgt = self.tgt_embed.weight[None].expand(B, -1, -1) # Left shape: (B, num_query, L)
             query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
 
             outs_dec, init_reference, inter_references, _, _ = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
