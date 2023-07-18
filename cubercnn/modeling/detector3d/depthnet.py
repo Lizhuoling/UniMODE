@@ -112,10 +112,50 @@ class ASPP(nn.Module):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
 
+class SELayer(nn.Module):
+
+    def __init__(self, channels, act_layer=nn.ReLU, gate_layer=nn.Sigmoid):
+        super().__init__()
+        self.conv_reduce = nn.Conv2d(channels, channels, 1, bias=True)
+        self.act1 = act_layer()
+        self.conv_expand = nn.Conv2d(channels, channels, 1, bias=True)
+        self.gate = gate_layer()
+
+    def forward(self, x, x_se):
+        x_se = self.conv_reduce(x_se)
+        x_se = self.act1(x_se)
+        x_se = self.conv_expand(x_se)
+        return x * self.gate(x_se)
+
+class Mlp(nn.Module):
+
+    def __init__(self,
+                 in_features,
+                 hidden_features=None,
+                 out_features=None,
+                 act_layer=nn.ReLU,
+                 drop=0.0):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.act = act_layer()
+        self.drop1 = nn.Dropout(drop)
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.drop2 = nn.Dropout(drop)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop1(x)
+        x = self.fc2(x)
+        x = self.drop2(x)
+        return x
+
 class DepthNet(nn.Module):
 
     def __init__(self, in_channels, mid_channels, context_channels,
-                 depth_channels):
+                 depth_channels, cfg = None):
         super(DepthNet, self).__init__()
         self.reduce_conv = nn.Sequential(
             nn.Conv2d(in_channels,
@@ -151,9 +191,58 @@ class DepthNet(nn.Module):
                       stride=1,
                       padding=0),
         )
+        self.cfg = cfg
+
+        if cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_CAM_INTRINSIC:
+            self.bn = nn.BatchNorm1d(4)
+            self.depth_mlp = Mlp(4, mid_channels, mid_channels)
+            self.depth_se = SELayer(mid_channels)  
+            self.context_mlp = Mlp(4, mid_channels, mid_channels)
+            self.context_se = SELayer(mid_channels)  
+
+        if cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
+            self.global_average_pool = nn.Sequential(
+                nn.Conv2d(mid_channels, mid_channels, kernel_size=1, stride=1, padding=1),
+                nn.AdaptiveAvgPool2d(1),
+            )
+            self.adapt_fc = nn.Linear(mid_channels, 6)
+
+        self.init_weights()
+
+    def init_weights(self):
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
+            nn.init.constant_(self.adapt_fc.weight, 0)
+            nn.init.constant_(self.adapt_fc.bias[:3], 1)    # x y z scaling factor
+            nn.init.constant_(self.adapt_fc.bias[3:], 0)    # x y z offset factor
 
     def forward(self, x, Ks):
         x = self.reduce_conv(x)
-        context = self.context_conv(x)
-        depth = self.depth_conv(x)
-        return torch.cat([depth, context], dim=1)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_CAM_INTRINSIC:
+            mlp_input = torch.stack(
+                (
+                    Ks[:, 0, 0],
+                    Ks[:, 1, 1],
+                    Ks[:, 0, 2],
+                    Ks[:, 1, 2],
+                ), dim = -1
+            )   # mlp_input shape: (B, 4)
+            mlp_input = self.bn(mlp_input)
+            context_se = self.context_mlp(mlp_input)[..., None, None]
+            context = self.context_se(x, context_se)
+            depth_se = self.depth_mlp(mlp_input)[..., None, None]
+            depth = self.depth_se(x, depth_se)
+        else:
+            context = x
+            depth = x
+
+        context = self.context_conv(context)
+        depth = self.depth_conv(depth)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
+            global_pool_x = self.global_average_pool(x).squeeze(-1).squeeze(-1)
+            bev_adaptive_reg = self.adapt_fc(global_pool_x) # Left shape: (B, 6)
+        else:
+            bev_adaptive_reg = None
+
+        return torch.cat([depth, context], dim=1), bev_adaptive_reg

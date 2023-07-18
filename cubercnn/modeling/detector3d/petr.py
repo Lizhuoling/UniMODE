@@ -305,7 +305,7 @@ class PETR_HEAD(nn.Module):
             nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
         )
 
-        self.depthnet = DepthNet(in_channels = self.in_channels, mid_channels = self.in_channels, context_channels = self.embed_dims, depth_channels = self.depth_channels)
+        self.depthnet = DepthNet(in_channels = self.in_channels, mid_channels = self.in_channels, context_channels = self.embed_dims, depth_channels = self.depth_channels, cfg = cfg)
 
         # Generating query heads
         self.lang_dim = cfg.MODEL.GLIP_MODEL.MODEL.LANGUAGE_BACKBONE.LANG_DIM
@@ -458,10 +458,22 @@ class PETR_HEAD(nn.Module):
         
         return frustum
 
-    def get_geometry(self, Ks):
-        points = self.frustum   # Left shape: (D, H, W, 3)
-        points = torch.cat((points[..., :2] * points[..., 2:], points[..., 2:]), dim = -1)  # Left shape: (D, H, W, 3)
-        points = points[None].unsqueeze(-1)  # Left shape: (1, D, H, W, 3, 1)
+    @torch.no_grad()
+    def get_geometry(self, Ks, bev_adaptive_reg, B):
+        points = self.frustum[None].expand(B, -1, -1, -1, -1).clone()   # Left shape: (B, D, H, W, 3)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
+            ori_position_range = torch.Tensor(self.position_range).cuda()[None].expand(B, -1)    # Left shape: (B, 6)
+            new_position_range = ori_position_range.clone()
+            new_position_range[:, 0:2] = new_position_range[:, 0:2].clone() * bev_adaptive_reg[:, 0:1] + bev_adaptive_reg[:, 3:4]
+            new_position_range[:, 2:4] = new_position_range[:, 2:4].clone() * bev_adaptive_reg[:, 1:2] + bev_adaptive_reg[:, 4:5]
+            new_position_range[:, 4:6] = new_position_range[:, 4:6].clone() * bev_adaptive_reg[:, 2:3] + bev_adaptive_reg[:, 5:6]
+            ori_bev_depth_demand = ((ori_position_range[:, 1] - ori_position_range[:, 0]).square() + (ori_position_range[:, 5] - ori_position_range[:, 4]).square()).sqrt() # Left shape: (bs,)
+            new_bev_depth_demand = ((new_position_range[:, 1] - new_position_range[:, 0]).square() + (new_position_range[:, 5] - new_position_range[:, 4]).square()).sqrt() # Left shape: (bs,)
+            points[..., 2] = points[..., 2] * (new_bev_depth_demand / ori_bev_depth_demand)[:, None, None, None] # Left shape: (B, D, H, W, 3)
+        
+        points = torch.cat((points[..., :2] * points[..., 2:], points[..., 2:]), dim = -1)  # Left shape: (B, D, H, W, 3)
+        points = points.unsqueeze(-1)  # Left shape: (1, D, H, W, 3, 1)
         Ks = Ks[:, None, None, None]    # Left shape: (B, 1, 1, 1, 3, 3)
         points = (Ks.inverse() @ points).squeeze(-1)    # Left shape: (B, D, H, W, 3)
         return points
@@ -470,13 +482,18 @@ class PETR_HEAD(nn.Module):
         B = feat.shape[0]
         img_mask = F.interpolate(img_mask[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
 
-        depth_and_feat = self.depthnet(feat, Ks)
+        depth_and_feat, bev_adaptive_reg = self.depthnet(feat, Ks)
         depth = depth_and_feat[:, :self.depth_channels].softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)
         img_feat_with_depth = depth.unsqueeze(1) * depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)].unsqueeze(2)  # Left shape: (B, C, D, H, W)
         img_feat_with_depth = img_feat_with_depth.permute(0, 2, 3, 4, 1)    # Left shape: (B, D, H, W, C)
 
-        geom_xyz = self.get_geometry(Ks)    # Left shape: (B, D, H, W, 3)
-        geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
+        geom_xyz = self.get_geometry(Ks, bev_adaptive_reg, B)    # Left shape: (B, D, H, W, 3)
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
+            voxel_coord = (self.voxel_coord[None].expand(B, -1) * bev_adaptive_reg[:, :3] + bev_adaptive_reg[:, 3:])[:, None, None, None]
+            voxel_size = (self.voxel_size[None].expand(B, -1) * bev_adaptive_reg[:, :3] + bev_adaptive_reg[:, 3:])[:, None, None, None]
+            geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
+        else:
+            geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
         geom_xyz[img_mask[:, None, :, :, None].expand_as(geom_xyz)] = -1   # Block feature from invalid image region.
 
         # Notably, the BEV feature shape should be (B, C bev_z, bev_x) rather than (B, C bev_y, bev_x).
@@ -486,9 +503,13 @@ class PETR_HEAD(nn.Module):
         bev_feat_pos = self.bev_pos2d_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
 
         # For vis
-        '''vis_bev_feat = bev_feat[0].mean(0).detach().cpu().numpy()
+        '''depth_map = depth[0].argmax(0).cpu().numpy()
+        plt.imshow(depth_map, cmap = 'magma_r')
+        plt.savefig('depth.png')
+        vis_bev_feat = bev_feat[0].mean(0).detach().cpu().numpy()
         plt.imshow(vis_bev_feat, cmap = 'magma_r')
         plt.savefig('vis.png')
+        cv2.imwrite('ori.png', batched_inputs[0]['image'].permute(1, 2, 0).cpu().numpy())
         pdb.set_trace()'''
         
         # Prepare the class name embedding following the operations in GLIP.
@@ -560,12 +581,25 @@ class PETR_HEAD(nn.Module):
         outputs_regs = torch.stack(outputs_regs, dim = 0)
         
         outputs_regs[..., self.reg_key_manager('loc')] = outputs_regs[..., self.reg_key_manager('loc')].sigmoid()
-        outputs_regs[..., self.reg_key_manager('loc')][..., 0] = outputs_regs[..., self.reg_key_manager('loc')][..., 0] * \
-            (self.position_range[1] - self.position_range[0]) + self.position_range[0]
-        outputs_regs[..., self.reg_key_manager('loc')][..., 1] = outputs_regs[..., self.reg_key_manager('loc')][..., 1] * \
-            (self.position_range[3] - self.position_range[2]) + self.position_range[2]
-        outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
-            (self.position_range[5] - self.position_range[4]) + self.position_range[4]
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
+            ori_position_range = torch.Tensor(self.position_range).cuda()[None].expand(B, -1)    # Left shape: (B, 6)
+            new_position_range = ori_position_range.clone()
+            new_position_range_x = new_position_range[:, 0:2].clone() * bev_adaptive_reg[:, 0:1] + bev_adaptive_reg[:, 3:4]
+            new_position_range_y = new_position_range[:, 2:4].clone() * bev_adaptive_reg[:, 1:2] + bev_adaptive_reg[:, 4:5]
+            new_position_range_z = new_position_range[:, 4:6].clone() * bev_adaptive_reg[:, 2:3] + bev_adaptive_reg[:, 5:6]   
+            new_position_range = torch.cat((new_position_range_x, new_position_range_y, new_position_range_z), dim = -1)    # Left shape: (B, 6)
+            new_position_range = new_position_range[None, :, None]   # Left shape: (1, B, 1, 6)
+            outputs_regs_x = outputs_regs[..., self.reg_key_manager('loc')][..., 0].clone() * (new_position_range[..., 1].clone() - new_position_range[..., 0].clone()) + new_position_range[..., 0].clone()
+            outputs_regs_y = outputs_regs[..., self.reg_key_manager('loc')][..., 1].clone() * (new_position_range[..., 3].clone() - new_position_range[..., 2].clone()) + new_position_range[..., 2].clone()
+            outputs_regs_z = outputs_regs[..., self.reg_key_manager('loc')][..., 2].clone() * (new_position_range[..., 5].clone() - new_position_range[..., 4].clone()) + new_position_range[..., 4].clone()
+            outputs_regs[..., self.reg_key_manager('loc')] = torch.stack((outputs_regs_x, outputs_regs_y, outputs_regs_z), dim  = -1)
+        else:
+            outputs_regs[..., self.reg_key_manager('loc')][..., 0] = outputs_regs[..., self.reg_key_manager('loc')][..., 0] * \
+                (self.position_range[1] - self.position_range[0]) + self.position_range[0]
+            outputs_regs[..., self.reg_key_manager('loc')][..., 1] = outputs_regs[..., self.reg_key_manager('loc')][..., 1] * \
+                (self.position_range[3] - self.position_range[2]) + self.position_range[2]
+            outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
+                (self.position_range[5] - self.position_range[4]) + self.position_range[4]
 
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
             outputs_regs[..., self.reg_key_manager('det2d_xywh')] = outputs_regs[..., self.reg_key_manager('det2d_xywh')].sigmoid()
@@ -775,7 +809,7 @@ class PETR_HEAD(nn.Module):
             loss_dict['dim_loss_{}'.format(dec_idx)] += self.reg_weight * self.reg_loss(bs_dim_preds, bs_dim_gts.log()).sum()
 
             # Pose loss
-            loss_dict['pose_loss_{}'.format(dec_idx)] += self.reg_weight * (1 - so3_relative_angle(bs_pose_preds, bs_pose_gts, eps=0.1, cos_angle=True)).sum()
+            loss_dict['pose_loss_{}'.format(dec_idx)] += self.reg_weight * (1 - so3_relative_angle(bs_pose_preds, bs_pose_gts, eps=1, cos_angle=True)).sum()
             
             if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
                 # 2D det reg loss

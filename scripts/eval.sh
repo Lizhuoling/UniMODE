@@ -1,4 +1,4 @@
-exp_id=BEVglobal_base1_omni3d_out_vov
+exp_id=BEVglobal_base3_omni3d_out_intrinsic
 
 CUDA_VISIBLE_DEVICES=3 python tools/train_net.py \
   --eval-only \

@@ -25,7 +25,7 @@ from detectron2.engine import (
 from detectron2.utils.events import EventStorage
 from detectron2.utils.logger import setup_logger
 
-#torch.autograd.set_detect_anomaly(True)
+torch.autograd.set_detect_anomaly(True)
 os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
 logger = logging.getLogger("cubercnn")
 
@@ -379,7 +379,7 @@ def main(args):
     filter_settings = data.get_filter_settings_from_cfg(cfg)
 
     priors = None
-
+    
     if args.eval_only:
         category_path = os.path.join(util.file_parts(args.config_file)[0], 'category_meta.json')
         
@@ -388,7 +388,6 @@ def main(args):
             category_path = util.CubeRCNNHandler._get_local_path(util.CubeRCNNHandler, category_path)
         
         metadata = util.load_json(category_path)
-
         # register the categories
         thing_classes = metadata['thing_classes']
         id_map = {int(key):val for key, val in metadata['thing_dataset_id_to_contiguous_id'].items()}
@@ -396,11 +395,10 @@ def main(args):
         MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id  = id_map
         
     else: 
-
         # setup and join the data.
         dataset_paths = [os.path.join('datasets', 'Omni3D', name + '.json') for name in cfg.DATASETS.TRAIN]
         datasets = data.Omni3D(dataset_paths, filter_settings=filter_settings)
-
+        
         # determine the meta data given the datasets used. 
         data.register_and_store_model_metadata(datasets, cfg.OUTPUT_DIR, filter_settings)
 

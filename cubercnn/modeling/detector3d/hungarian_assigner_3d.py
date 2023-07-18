@@ -120,7 +120,7 @@ class HungarianAssigner3D(BaseAssigner):
 
         pose_preds = pose_preds.unsqueeze(1).expand(-1, num_gts, -1, -1).reshape(num_preds * num_gts, 3, 3)    # Left shape: (num_query, num_gt, 3, 3)
         pose_gts = pose_gts[None].expand(num_preds, -1, -1, -1).reshape(num_preds * num_gts, 3, 3) # Left shape: (num_query, num_gt, 3, 3)
-        cost_pose = self.reg_weight * (1-so3_relative_angle(pose_preds, pose_gts, eps=0.1, cos_angle=True)).view(num_preds, num_gts)  # Left shape: (num_query, num_gt)
+        cost_pose = self.reg_weight * (1-so3_relative_angle(pose_preds, pose_gts, eps=1, cos_angle=True)).view(num_preds, num_gts)  # Left shape: (num_query, num_gt)
 
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
             det2d_reg_loss = self.det2d_l1_weight * self.reg_loss(det2d_xywh_preds[:, None].expand(-1, num_gts, -1), 
