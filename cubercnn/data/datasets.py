@@ -52,6 +52,11 @@ def save_global_dataset_stats(stats, path_to_stats=None):
 
 def get_filter_settings_from_cfg(cfg=None):
 
+    if cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
+        class_name_list = cfg.DATASETS.CATEGORY_NAMES + cfg.DATASETS.NOVEL_CLASS_NAMES
+    else:
+        class_name_list = cfg.DATASETS.CATEGORY_NAMES
+
     if cfg is None:
         return {
             'category_names': [], 
@@ -66,7 +71,7 @@ def get_filter_settings_from_cfg(cfg=None):
         }
     else:
         return {
-            'category_names': cfg.DATASETS.CATEGORY_NAMES, 
+            'category_names': class_name_list, 
             'ignore_names': cfg.DATASETS.IGNORE_NAMES, 
             'truncation_thres': cfg.DATASETS.TRUNCATION_THRES, 
             'visibility_thres': cfg.DATASETS.VISIBILITY_THRES,

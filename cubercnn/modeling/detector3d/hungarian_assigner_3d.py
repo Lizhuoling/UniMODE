@@ -93,12 +93,6 @@ class HungarianAssigner3D(BaseAssigner):
         loc_gts = gt_instance.get('gt_boxes3D')[..., 6:9].to(device) # Left shape: (num_gt, 3)
         dim_gts = gt_instance.get('gt_boxes3D')[..., 3:6].to(device) # Left shape: (num_gt, 3)
         pose_gts = gt_instance.get('gt_poses').to(device) # Left shape: (num_gt, 3, 3)
-            
-        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
-            det2d_xywh_preds = bbox_preds[..., reg_key_manager('det2d_xywh')] # Left shape: (num_query, 4)
-            det2d_xywh_gts = gt_instance.get('gt_boxes').to(device).tensor  # Left shape: (num_gt, 4)
-            img_scale = torch.cat((ori_img_resolution, ori_img_resolution), dim = 0)    # Left shape: (4,)
-            det2d_xywh_gts = det2d_xywh_gts / img_scale[None]   # Left shape: (num_gt, 4)
 
         indices = []
         if num_gts == 0:
@@ -122,19 +116,41 @@ class HungarianAssigner3D(BaseAssigner):
         pose_gts = pose_gts[None].expand(num_preds, -1, -1, -1).reshape(num_preds * num_gts, 3, 3) # Left shape: (num_query, num_gt, 3, 3)
         cost_pose = self.reg_weight * (1-so3_relative_angle(pose_preds, pose_gts, eps=1, cos_angle=True)).view(num_preds, num_gts)  # Left shape: (num_query, num_gt)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET:
-            det2d_reg_loss = self.det2d_l1_weight * self.reg_loss(det2d_xywh_preds[:, None].expand(-1, num_gts, -1), 
-                det2d_xywh_gts[None].expand(num_preds, -1, -1)).sum(-1)  # Left shape: (num_query, num_gt)
-            det2d_iou_loss = -self.det2d_iou_weight * generalized_box_iou(
-                box_cxcywh_to_xyxy(det2d_xywh_preds),
-                box_cxcywh_to_xyxy(det2d_xywh_gts)
-            )   # Left shape: (num_query, num_gt)
-        else:
-            det2d_reg_loss = 0
-            det2d_iou_loss = 0
-
-        cost = cls_cost + loc_cost + dim_cost + cost_pose + det2d_reg_loss + det2d_iou_loss # Left shape: (num_query, num_gt)
+        cost = cls_cost + loc_cost + dim_cost + cost_pose # Left shape: (num_query, num_gt)
 
         indices.append(linear_sum_assignment(cost.cpu().numpy()))
         
+        return [(torch.as_tensor(i, dtype = torch.int64), torch.as_tensor(j, dtype = torch.int64)) for i, j in indices]
+
+@BBOX_ASSIGNERS.register_module()
+class HungarianAssigner2D(BaseAssigner):
+    def __init__(self, cls_weight=1.0, det2d_l1_weight = 5.0, det2d_iou_weight = 2.0, total_cls_num = None, cfg = None):
+        self.cls_weight = cls_weight
+        self.det2d_l1_weight = det2d_l1_weight
+        self.det2d_iou_weight = det2d_iou_weight
+        self.total_cls_num = total_cls_num
+        self.cfg = cfg
+
+    @torch.no_grad()
+    def assign(self, cls_scores, bbox2d_pred, novel_cls_gt, ori_img_resolution, assign_result_3D, macthed_cost = 1e6):
+        num_preds, num_gts = bbox2d_pred.size(0), novel_cls_gt['labels'].size(0)
+        device = bbox2d_pred.device
+
+        indices = []
+        if num_gts == 0:
+            indices.append([[], []])
+            return [(torch.as_tensor(i, dtype = torch.int64), torch.as_tensor(j, dtype = torch.int64)) for i, j in indices]
+
+        cls_scores = cls_scores.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_pred, num_gt, num_cls)
+        bbox2d_pred = (bbox2d_pred / ori_img_resolution[None]).view(num_preds, 4) # Left shape: (num_pred, 4)
+        cls_gts = F.one_hot(novel_cls_gt['labels'], num_classes = self.total_cls_num)[None].expand(num_preds, -1, -1)   # Left shape: (num_pred, num_gt, num_cls)
+        bbox2d_gt = novel_cls_gt['bbox']    # Left shape: (num_gt, 4)
+
+        cls_cost = self.cls_weight * torchvision.ops.sigmoid_focal_loss(cls_scores, cls_gts.float(), reduction = 'none').sum(-1)    # Left shape: (num_pred, num_gt)
+        iou_cost = -self.det2d_iou_weight * torch.clamp(generalized_box_iou(bbox2d_pred, bbox2d_gt), max = self.cfg.MODEL.DETECTOR3D.PETR.HEAD.DET2D_IOU_THRE)   # Left shape: (num_pred, num_gt)
+        cost = cls_cost + iou_cost  # Left shape: (num_pred, num_gt)
+
+        cost[assign_result_3D[0], :] = macthed_cost # Avoid that the queries matched to 3D gts are matched again.
+
+        indices.append(linear_sum_assignment(cost.cpu().numpy()))
         return [(torch.as_tensor(i, dtype = torch.int64), torch.as_tensor(j, dtype = torch.int64)) for i, j in indices]

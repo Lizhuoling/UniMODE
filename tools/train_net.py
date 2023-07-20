@@ -25,7 +25,7 @@ from detectron2.engine import (
 from detectron2.utils.events import EventStorage
 from detectron2.utils.logger import setup_logger
 
-torch.autograd.set_detect_anomaly(True)
+#torch.autograd.set_detect_anomaly(True)
 os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
 logger = logging.getLogger("cubercnn")
 
@@ -441,7 +441,7 @@ def main(args):
 
         # compute priors given the training data.
         priors = util.compute_priors(cfg, datasets)
-        
+    
     '''
     The training loops can attempt to train for N times.
     This catches a divergence or other failure modes. 

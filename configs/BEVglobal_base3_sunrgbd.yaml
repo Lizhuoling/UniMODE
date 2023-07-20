@@ -1,11 +1,12 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val', 'SUNRGBD_train', 'SUNRGBD_val',)
-  #TRAIN: ('SUNRGBD_val', 'KITTI_val')
-  TEST: ('nuScenes_test', 'KITTI_test', 'SUNRGBD_test')
-  #TEST: ('SUNRGBD_val', 'KITTI_val')
-  CATEGORY_NAMES: ('shelves', 'stove', 'table', 'pillow', 'sofa', 'bin', 'cabinet', 'laptop', 'machine', 'towel', 'night stand', 'sink', 'clothes', 'van', 'chair', 'box', 'traffic cone', 'blinds', 'barrier', 'curtain', 'counter', 'motorcycle', 'stationery', 'cup', 'lamp', 'bottle', 'trailer', 'bus', 'bookcase', 'mirror', 'bed', 'bicycle', 'oven', 'books', 'floor mat', 'bathtub', 'door', 'truck', 'cyclist', 'pedestrian', 'toilet', 'desk', 'refrigerator', 'shoes', 'car', 'window', 'television', 'picture')
+  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val',)
+  #TRAIN: ('KITTI_val',)
+  TEST: ('SUNRGBD_test',)
+  #TEST: ('KITTI_val',)
+  CATEGORY_NAMES: ('bicycle', 'books', 'bottle', 'chair', 'cup', 'laptop', 'shoes', 'towel', 'blinds', 'window', 'lamp', 'shelves', 'mirror', 'sink', 'cabinet', 'bathtub', 'door', 'toilet', 'desk', 'box', 'bookcase', 'picture', 'table', 'counter', 'bed', 'night stand', 'pillow', 'sofa', 'television', 'floor mat', 'curtain', 'clothes', 'stationery', 'refrigerator', 'bin', 'stove', 'oven', 'machine',)
+  #NOVEL_CLASS_NAMES: ('cyclist', 'pedestrian', 'bicycle',)
 
 INPUT:
   RESIZE_TGT_SIZE: (1280, 1024)
@@ -13,11 +14,11 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 96
+  IMS_PER_BATCH: 32
   TYPE: "mmcv_AdamW"
-  BASE_LR: 6e-4
+  BASE_LR: 2e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 58000
+  MAX_ITER: 29000
   VIRTUAL_EPOCHS: 20
 
   LR_SCHEDULER_NAME: "CosineAnnealing"
@@ -31,19 +32,20 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 11600
+  EVAL_PERIOD: 5800
 
 MODEL:
   META_ARCHITECTURE: "OV_3D_Det"
 
   DETECTOR3D:
     DETECT_ARCHITECTURE: "petr"
+    OV_PROTOCOL: False
 
     PETR:
       GRID_MASK: True
 
       BACKBONE_NAME: 'VoVNet'
-      BACKBONE_FP16: False
+      BACKBONE_FP16: True
       NECK_NAME: 'SECONDFPN'
       TRANSFORMER_NAME: 'DEFORMABLE_TRANSFORMER'
       MATCHER_NAME: 'HungarianAssigner3D'
@@ -53,12 +55,13 @@ MODEL:
 
       HEAD:
         OV_CLS_HEAD: True
-        PERFORM_2D_DET: False
         UNCERN_RANGE: [-10, 10]
         CLS_WEIGHT: 2.0
         REG_WEIGHT: 0.25
         DET_2D_L1_WEIGHT: 5.0
         DET_2D_GIOU_WEIGHT: 2.0
+        
+        DET2D_IOU_THRE: 0.7
 
         ENC_NUM: 1
         DEC_NUM: 6
@@ -79,6 +82,7 @@ MODEL:
     GLIP_INITIALIZE_QUERY: True
     NO_GRADIENT: True
     GLIP_WEIGHT: "MODEL/glip_a_tiny_o365.pth"
+    GLIP_PSEUDO_CONF: 0.4
 
     MODEL:
       META_ARCHITECTURE: "GeneralizedVLRCNN"

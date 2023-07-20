@@ -11,6 +11,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from mmcv.runner.base_module import BaseModule
+from mmcv.runner import force_fp32, auto_fp16
+
 from detectron2.modeling.meta_arch import META_ARCH_REGISTRY
 from detectron2.config import CfgNode as CN
 from detectron2.structures import ImageList, Instances, Boxes
@@ -24,19 +27,21 @@ from maskrcnn_benchmark.utils.checkpoint import DetectronCheckpointer
 from cubercnn.modeling.detector3d.build import build_3d_detector
 
 @META_ARCH_REGISTRY.register()
-class OV_3D_Det(nn.Module):
+class OV_3D_Det(BaseModule):
     def __init__(self, cfg, priors=None):
         super().__init__()
         self.cfg = cfg
-        self.fp16_enabled = False
+        self.fp16_enabled = True
         self.img_mean = torch.Tensor(self.cfg.MODEL.PIXEL_MEAN)[:, None, None]
         self.img_std = torch.Tensor(self.cfg.MODEL.PIXEL_STD)[:, None, None]
 
-        self.total_thing_classes = MetadataCatalog.get('omni3d_model').thing_classes
+        self.thing_classes = MetadataCatalog.get('omni3d_model').thing_classes
+        self.dataset_id_to_contiguous_id = MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id
+
         self.care_thing_classes = self.cfg.DATASETS.CATEGORY_NAMES
         self.local2global_cls_map = dict()
         for src_idx, care_cls in enumerate(self.care_thing_classes):
-            tgt_idx = self.total_thing_classes.index(care_cls)
+            tgt_idx = self.thing_classes.index(care_cls)
             self.local2global_cls_map[src_idx] = tgt_idx
         
         ### Build the GLIP model ###
@@ -51,7 +56,10 @@ class OV_3D_Det(nn.Module):
                 _ = checkpointer.load(self.glip_cfg.GLIP_WEIGHT)
         
         # Prepare the content for GLIP detection.
-        class_name_list = self.cfg.DATASETS.CATEGORY_NAMES
+        if cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
+            class_name_list = cfg.DATASETS.CATEGORY_NAMES + cfg.DATASETS.NOVEL_CLASS_NAMES
+        else:
+            class_name_list = cfg.DATASETS.CATEGORY_NAMES
         categories = {i:class_name for i, class_name in enumerate(class_name_list)}
         self.all_queries, self.all_positive_map_label_to_token = create_queries_and_maps_from_dataset(categories, self.glip_cfg)
         assert len(self.all_queries) == 1
@@ -107,12 +115,19 @@ class OV_3D_Det(nn.Module):
                 glip_out.extra_fields['cls_emb'] = torch.cat((glip_out.extra_fields['cls_emb'], glip_out.extra_fields['cls_emb'].new_zeros(pad_num, glip_out.extra_fields['cls_emb'].shape[-1])), dim = 0)
         return glip_outs
 
+    @auto_fp16(apply_to=('images',), out_fp32=True)
+    def forward_glip(self, images, captions, positive_map_label_to_token):
+        glip_outs, glip_text_emb, glip_visual_emb = self.glip_model(images, captions=captions, positive_map=positive_map_label_to_token)
+        return glip_outs, glip_text_emb, glip_visual_emb
+
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
         self.forward_once()
 
         images = self.preprocess_image(batched_inputs)
+        ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # Left shape: (bs, 2)
+
         if self.training:
-            batched_inputs = self.remove_irrelevant_gts(batched_inputs)
+            batched_inputs, novel_cls_id_list = self.remove_irrelevant_gts(batched_inputs)
         # OV 2D Det
         if self.glip_cfg.NO_GRADIENT:
             no_gradient_wrapper = torch.no_grad
@@ -128,7 +143,8 @@ class OV_3D_Det(nn.Module):
                     
                 if self.glip_model.training:
                     self.glip_model.eval()
-                glip_outs, glip_text_emb, glip_visual_emb = self.glip_model(images.tensor, captions=captions, positive_map=positive_map_label_to_token)
+                #glip_outs, glip_text_emb, glip_visual_emb = self.glip_model(images.tensor, captions=captions, positive_map=positive_map_label_to_token)
+                glip_outs, glip_text_emb, glip_visual_emb = self.forward_glip(images.tensor, captions, positive_map_label_to_token)
                 for glip_out in glip_outs:
                     glip_out.extra_fields['cls_emb'] = self.extract_cls_emb(glip_out.extra_fields['labels'], positive_map_label_to_token)
                     #vis_2d_det(boxlist = glip_out, img = batched_inputs[0]['image'].permute(1, 2, 0).numpy(), class_names = self.cfg.DATASETS.CATEGORY_NAMES) 
@@ -141,6 +157,20 @@ class OV_3D_Det(nn.Module):
         else:
             glip_results = {}
             glip_text_emb, glip_visual_emb = None, None
+
+        if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL and self.training:
+            novel_cls_gts = []
+            novel_glip_box_flag = glip_results['labels'].new_zeros((glip_results['bbox'].shape[0], glip_results['bbox'].shape[1]), dtype = torch.bool)  # Left shape: (bs, num_glip_out)
+            for novel_cls_id in novel_cls_id_list:
+                novel_glip_box_flag = novel_glip_box_flag | (glip_results['labels'] == novel_cls_id)
+            novel_glip_box_flag = novel_glip_box_flag & (glip_results['scores'] > self.cfg.MODEL.GLIP_MODEL.GLIP_PSEUDO_CONF)   # Left shape: (bs, num_glip_out)
+            for bs_idx, flag_one_bs in enumerate(novel_glip_box_flag):
+                novel_cls_gts.append({})
+                novel_cls_gts[bs_idx]['labels'] = glip_results['labels'][bs_idx][novel_glip_box_flag[bs_idx]].clone()
+                novel_cls_gts[bs_idx]['scores'] = glip_results['scores'][bs_idx][novel_glip_box_flag[bs_idx]].clone()
+                novel_cls_gts[bs_idx]['bbox'] = glip_results['bbox'][bs_idx][novel_glip_box_flag[bs_idx]].clone()
+                bs_reso_after_aug = ori_img_resolution[bs_idx]  # Left shape: (2,)
+                novel_cls_gts[bs_idx]['bbox'] = novel_cls_gts[bs_idx]['bbox'] / torch.cat((bs_reso_after_aug, bs_reso_after_aug), dim = -1)[None]   # Normalize the 2D box.
         
         # 3D Det
         detector_out = self.detector(images, batched_inputs, glip_results, self.class_name_emb, glip_text_emb, glip_visual_emb)
@@ -163,16 +193,14 @@ class OV_3D_Det(nn.Module):
             print('max_range:', self.max_range)
         return'''
         
-        ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)
-        
         if self.training:
-            loss_dict = self.forward_train(detector_out, batched_inputs, ori_img_resolution)
+            loss_dict = self.forward_train(detector_out, batched_inputs, ori_img_resolution, novel_cls_gts)
             return loss_dict
         else:
             return self.forward_inference(detector_out, batched_inputs, ori_img_resolution)
         
-    def forward_train(self, detector_out, batched_inputs, ori_img_resolution):
-        return self.detector.loss(detector_out, batched_inputs, ori_img_resolution)
+    def forward_train(self, detector_out, batched_inputs, ori_img_resolution, novel_cls_gts = None):
+        return self.detector.loss(detector_out, batched_inputs, ori_img_resolution, novel_cls_gts)
 
     def forward_inference(self, detector_out, batched_inputs, ori_img_resolution, conf_thre = 0.01):
         inference_results = self.detector.inference(detector_out, batched_inputs, ori_img_resolution)
@@ -204,16 +232,27 @@ class OV_3D_Det(nn.Module):
         '''
         Description: Remove the labels the class IDs of which are -1.
         '''
-        for batch_input in batched_inputs:
+        novel_cls_id_list = []
+        if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
+            for novel_cls in self.cfg.DATASETS.NOVEL_CLASS_NAMES:
+                novel_cls_id = self.thing_classes.index(novel_cls)
+                novel_cls_id_list.append(novel_cls_id)
+
+        for bs_idx, batch_input in enumerate(batched_inputs):
             cls_gts = batch_input['instances'].get('gt_classes')
+
             valid_gt_mask = (cls_gts != -1)
+            if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
+                for novel_cls_id in novel_cls_id_list:
+                    valid_gt_mask = valid_gt_mask & (cls_gts != novel_cls_id)   # Remove the label instances that are in the novel class name list.
+
             for gt_key in ['gt_classes', 'gt_boxes', 'gt_boxes3D', 'gt_poses', 'gt_keypoints', 'gt_unknown_category_mask']:
                 if gt_key in ('gt_boxes', 'gt_keypoints'):
                     batch_input['instances']._fields[gt_key].tensor = batch_input['instances']._fields[gt_key].tensor[valid_gt_mask]
                 else:
                     batch_input['instances']._fields[gt_key] = batch_input['instances']._fields[gt_key][valid_gt_mask]
 
-        return batched_inputs
+        return batched_inputs, novel_cls_id_list
         
 
 def pseudo_with():
@@ -236,6 +275,7 @@ def vis_2d_det(boxlist, img, class_names, conf_thre = 0.5):
         img = cv2.rectangle(img, box_loc[0:2], box_loc[2:4], (0, 255, 0))
         img = cv2.putText(img, "{:s}: {:.2f}".format(class_name, box_confs[cnt]), box_loc[0:2], cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 255, 0))
     cv2.imwrite('vis.png', img)
+    pdb.set_trace()
 
 def create_queries_and_maps_from_dataset(categories, cfg):
     

@@ -7,6 +7,7 @@ def get_cfg_defaults(cfg):
 
     # A list of category names which will be used
     cfg.DATASETS.CATEGORY_NAMES = []
+    cfg.DATASETS.NOVEL_CLASS_NAMES = []
 
     # The category names which will be treated as ignore
     # e.g., not counting as background during training
@@ -41,6 +42,8 @@ def get_cfg_defaults(cfg):
 
     cfg.MODEL.DETECTOR3D = CN()
     cfg.MODEL.DETECTOR3D.DETECT_ARCHITECTURE = 'petr'
+    cfg.MODEL.DETECTOR3D.OV_PROTOCOL = False
+
     cfg.MODEL.DETECTOR3D.PETR = CN()
     cfg.MODEL.DETECTOR3D.PETR.BACKBONE_FP16 = False
     cfg.MODEL.DETECTOR3D.PETR.USE_NECK = True
@@ -65,9 +68,9 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.DETECTOR3D.PETR.HEAD.REG_WEIGHT = 0.25
     cfg.MODEL.DETECTOR3D.PETR.HEAD.DET_2D_L1_WEIGHT = 5.0
     cfg.MODEL.DETECTOR3D.PETR.HEAD.DET_2D_GIOU_WEIGHT = 2.0
-    cfg.MODEL.DETECTOR3D.PETR.HEAD.PERFORM_2D_DET = True
     cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_NUM = 0
     cfg.MODEL.DETECTOR3D.PETR.HEAD.DEC_NUM = 6
+    cfg.MODEL.DETECTOR3D.PETR.HEAD. DET2D_IOU_THRE = 1.0
 
     cfg.MODEL.DETECTOR3D.PETR.HEAD.POSITION_RANGE = [-65, 65, -25, 40, 0.0, 220]
     cfg.MODEL.DETECTOR3D.PETR.HEAD.GRID_SIZE = [2.0, 65.0, 2.0]
@@ -210,6 +213,7 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY = True
     cfg.MODEL.GLIP_MODEL.NO_GRADIENT = True
     cfg.MODEL.GLIP_MODEL.GLIP_WEIGHT = ""
+    cfg.MODEL.GLIP_MODEL.GLIP_PSEUDO_CONF = 0.0
     
     cfg.MODEL.GLIP_MODEL.MODEL = CN()
     cfg.MODEL.GLIP_MODEL.MODEL.RPN_ONLY = False

@@ -250,7 +250,8 @@ def get_cuboid_verts(K, box3d, R=None, view_R=None, view_T=None):
 
     # project to 2D
     corners_2d = K @ corners_3d.transpose(1, 2)
-    corners_2d[:, :2, :] = corners_2d[:, :2, :] / corners_2d[:, 2, :].unsqueeze(1)
+    cp_corners_2d = corners_2d.clone()
+    corners_2d[:, :2, :] = cp_corners_2d[:, :2, :] / cp_corners_2d[:, 2, :].unsqueeze(1)
     corners_2d = corners_2d.transpose(1, 2)
 
     if squeeze:
