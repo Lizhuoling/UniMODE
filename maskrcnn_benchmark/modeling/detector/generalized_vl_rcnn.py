@@ -70,12 +70,10 @@ class GeneralizedVLRCNN(nn.Module):
         detections / masks from it.
     """
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, ori_cfg):
         super(GeneralizedVLRCNN, self).__init__()
         self.cfg = cfg
-
-        # visual encoder
-        self.backbone = build_backbone(cfg)
+        self.ori_cfg = ori_cfg
 
         # language encoder
         if cfg.MODEL.LANGUAGE_BACKBONE.TOKENIZER_TYPE == "clip":
@@ -94,6 +92,9 @@ class GeneralizedVLRCNN(nn.Module):
         self.tokenizer_vocab_ids = [item for key, item in self.tokenizer_vocab.items()]
 
         self.language_backbone = build_language_backbone(cfg)
+
+        # visual encoder
+        self.backbone = build_backbone(cfg)
 
         self.rpn = build_rpn(cfg)
         self.roi_heads = build_roi_heads(cfg)

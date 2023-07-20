@@ -848,7 +848,8 @@ class PETR_HEAD(nn.Module):
                 loss_dict['2d_iou_loss_{}'.format(dec_idx)] += self.det2d_iou_weight * iou_loss.sum()
             
             num_pos += gt_idxs.shape[0]
-            num_2d_pos += gt2d_idxs.shape[0]
+            if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
+                num_2d_pos += gt2d_idxs.shape[0]
         
         num_pos = torch_dist.reduce_mean(torch.Tensor([num_pos]).cuda()).item()
         torch_dist.synchronize()

@@ -6,6 +6,6 @@ _DETECTION_META_ARCHITECTURES = {"GeneralizedRCNN": GeneralizedRCNN,
                                  }
 
 
-def build_detection_model(cfg):
+def build_detection_model(cfg, ori_cfg):
     meta_arch = _DETECTION_META_ARCHITECTURES[cfg.MODEL.META_ARCHITECTURE]
-    return meta_arch(cfg)
+    return meta_arch(cfg, ori_cfg)

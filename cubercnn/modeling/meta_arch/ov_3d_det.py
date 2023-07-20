@@ -49,7 +49,7 @@ class OV_3D_Det(BaseModule):
         self.glip_cfg.freeze()
         
         if self.glip_cfg.USE_GLIP:
-            self.glip_model = build_detection_model(self.glip_cfg)
+            self.glip_model = build_detection_model(self.glip_cfg, cfg)
 
             if self.glip_cfg.GLIP_WEIGHT != "":
                 checkpointer = DetectronCheckpointer(cfg, self.glip_model, save_dir="")
@@ -71,6 +71,7 @@ class OV_3D_Det(BaseModule):
 
         #self.max_range = [9999, -9999, 9999, -9999, 9999, -9999]    # For debug
 
+    @torch.no_grad()
     def forward_once(self):
         if not self.forward_once_flag:
             with torch.no_grad():
@@ -126,15 +127,21 @@ class OV_3D_Det(BaseModule):
         images = self.preprocess_image(batched_inputs)
         ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # Left shape: (bs, 2)
 
-        if self.training:
-            batched_inputs, novel_cls_id_list = self.remove_irrelevant_gts(batched_inputs)
         # OV 2D Det
         if self.glip_cfg.NO_GRADIENT:
             no_gradient_wrapper = torch.no_grad
         else:
             no_gradient_wrapper = pseudo_with
 
-        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
+        if self.training:
+            batched_inputs = self.remove_invalid_gts(batched_inputs)
+        novel_cls_id_list = []
+        if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
+            for novel_cls in self.cfg.DATASETS.NOVEL_CLASS_NAMES:
+                novel_cls_id = self.thing_classes.index(novel_cls)
+                novel_cls_id_list.append(novel_cls_id)
+
+        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY or (self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL and self.training and self.cfg.MODEL.DETECTOR3D.PETR.HEAD.DET2D_FROM == 'GLIP'):
             with no_gradient_wrapper():
                 query_i = 0   # Only support one query sentence.
 
@@ -145,9 +152,9 @@ class OV_3D_Det(BaseModule):
                     self.glip_model.eval()
                 #glip_outs, glip_text_emb, glip_visual_emb = self.glip_model(images.tensor, captions=captions, positive_map=positive_map_label_to_token)
                 glip_outs, glip_text_emb, glip_visual_emb = self.forward_glip(images.tensor, captions, positive_map_label_to_token)
-                for glip_out in glip_outs:
+                for cnt, glip_out in enumerate(glip_outs):
                     glip_out.extra_fields['cls_emb'] = self.extract_cls_emb(glip_out.extra_fields['labels'], positive_map_label_to_token)
-                    #vis_2d_det(boxlist = glip_out, img = batched_inputs[0]['image'].permute(1, 2, 0).numpy(), class_names = self.cfg.DATASETS.CATEGORY_NAMES) 
+                    #vis_2d_det(boxlist = glip_out, img = batched_inputs[cnt]['image'].permute(1, 2, 0).numpy(), class_names = self.cfg.DATASETS.CATEGORY_NAMES) 
             glip_results = dict()
             glip_outs = self.pad_glip_outs(glip_outs)
             glip_results['bbox'] = torch.stack([ele.bbox for ele in glip_outs], dim  = 0)   # Left shape: (bs, box_num, 4)
@@ -160,17 +167,33 @@ class OV_3D_Det(BaseModule):
 
         if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL and self.training:
             novel_cls_gts = []
-            novel_glip_box_flag = glip_results['labels'].new_zeros((glip_results['bbox'].shape[0], glip_results['bbox'].shape[1]), dtype = torch.bool)  # Left shape: (bs, num_glip_out)
-            for novel_cls_id in novel_cls_id_list:
-                novel_glip_box_flag = novel_glip_box_flag | (glip_results['labels'] == novel_cls_id)
-            novel_glip_box_flag = novel_glip_box_flag & (glip_results['scores'] > self.cfg.MODEL.GLIP_MODEL.GLIP_PSEUDO_CONF)   # Left shape: (bs, num_glip_out)
-            for bs_idx, flag_one_bs in enumerate(novel_glip_box_flag):
-                novel_cls_gts.append({})
-                novel_cls_gts[bs_idx]['labels'] = glip_results['labels'][bs_idx][novel_glip_box_flag[bs_idx]].clone()
-                novel_cls_gts[bs_idx]['scores'] = glip_results['scores'][bs_idx][novel_glip_box_flag[bs_idx]].clone()
-                novel_cls_gts[bs_idx]['bbox'] = glip_results['bbox'][bs_idx][novel_glip_box_flag[bs_idx]].clone()
-                bs_reso_after_aug = ori_img_resolution[bs_idx]  # Left shape: (2,)
-                novel_cls_gts[bs_idx]['bbox'] = novel_cls_gts[bs_idx]['bbox'] / torch.cat((bs_reso_after_aug, bs_reso_after_aug), dim = -1)[None]   # Normalize the 2D box.
+            if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.DET2D_FROM == 'GLIP':
+                novel_glip_box_flag = glip_results['labels'].new_zeros((glip_results['bbox'].shape[0], glip_results['bbox'].shape[1]), dtype = torch.bool)  # Left shape: (bs, num_glip_out)
+                for novel_cls_id in novel_cls_id_list:
+                    novel_glip_box_flag = novel_glip_box_flag | (glip_results['labels'] == novel_cls_id)
+                novel_glip_box_flag = novel_glip_box_flag & (glip_results['scores'] > self.cfg.MODEL.GLIP_MODEL.GLIP_PSEUDO_CONF)   # Left shape: (bs, num_glip_out)
+                for bs_idx, flag_one_bs in enumerate(novel_glip_box_flag):
+                    novel_cls_gts.append({})
+                    novel_cls_gts[bs_idx]['labels'] = glip_results['labels'][bs_idx][novel_glip_box_flag[bs_idx]].clone()
+                    novel_cls_gts[bs_idx]['bbox'] = glip_results['bbox'][bs_idx][novel_glip_box_flag[bs_idx]].clone()
+                    bs_reso_after_aug = ori_img_resolution[bs_idx]  # Left shape: (2,)
+                    novel_cls_gts[bs_idx]['bbox'] = novel_cls_gts[bs_idx]['bbox'] / torch.cat((bs_reso_after_aug, bs_reso_after_aug), dim = -1)[None]   # Normalize the 2D box.
+            elif self.cfg.MODEL.DETECTOR3D.PETR.HEAD.DET2D_FROM == 'GT2D':
+                for bs_idx, batch_input in enumerate(batched_inputs):
+                    novel_cls_gts.append({})
+                    bs_gt_boxes = batch_input['instances'].get('gt_boxes').tensor.to(images.device)  # Left shape: (num_box, 4)
+                    bs_gt_cls = batch_input['instances'].get('gt_classes').to(images.device)    # Left shape: (num_box,)
+                    bs_novel_box_flag = bs_gt_boxes.new_zeros((bs_gt_boxes.shape[0],), dtype = torch.bool) # Left shape: (num_box,)
+                    for novel_cls_id in novel_cls_id_list:
+                        bs_novel_box_flag = bs_novel_box_flag | (bs_gt_cls == novel_cls_id)
+                    novel_cls_gts[bs_idx]['labels'] = bs_gt_cls[bs_novel_box_flag]  # Left shape: (num_valid_box,)
+                    bs_reso_after_aug = ori_img_resolution[bs_idx]  # Left shape: (2,)
+                    novel_cls_gts[bs_idx]['bbox'] = bs_gt_boxes[bs_novel_box_flag] / torch.cat((bs_reso_after_aug, bs_reso_after_aug), dim = -1)[None]  # Left shape: (num_valid_box, 4)
+        else:
+            novel_cls_gts = None
+
+        if self.training and self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
+            batched_inputs = self.remove_novel_gts(batched_inputs, novel_cls_id_list)
         
         # 3D Det
         detector_out = self.detector(images, batched_inputs, glip_results, self.class_name_emb, glip_text_emb, glip_visual_emb)
@@ -228,20 +251,25 @@ class OV_3D_Det(BaseModule):
         images = ImageList.from_tensors(images)
         return images
     
-    def remove_irrelevant_gts(self, batched_inputs):
+    def remove_invalid_gts(self, batched_inputs):
         '''
-        Description: Remove the labels the class IDs of which are -1.
+            Description: Remove the labels the class IDs of which are -1.
         '''
-        novel_cls_id_list = []
-        if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
-            for novel_cls in self.cfg.DATASETS.NOVEL_CLASS_NAMES:
-                novel_cls_id = self.thing_classes.index(novel_cls)
-                novel_cls_id_list.append(novel_cls_id)
+        for batch_input in batched_inputs:
+            cls_gts = batch_input['instances'].get('gt_classes')
+            valid_gt_mask = (cls_gts != -1)
+            for gt_key in ['gt_classes', 'gt_boxes', 'gt_boxes3D', 'gt_poses', 'gt_keypoints', 'gt_unknown_category_mask']:
+                if gt_key in ('gt_boxes', 'gt_keypoints'):
+                    batch_input['instances']._fields[gt_key].tensor = batch_input['instances']._fields[gt_key].tensor[valid_gt_mask]
+                else:
+                    batch_input['instances']._fields[gt_key] = batch_input['instances']._fields[gt_key][valid_gt_mask]
 
+        return batched_inputs
+
+    def remove_novel_gts(self, batched_inputs, novel_cls_id_list):
         for bs_idx, batch_input in enumerate(batched_inputs):
             cls_gts = batch_input['instances'].get('gt_classes')
-
-            valid_gt_mask = (cls_gts != -1)
+            valid_gt_mask = torch.ones_like(cls_gts, dtype = torch.bool)
             if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
                 for novel_cls_id in novel_cls_id_list:
                     valid_gt_mask = valid_gt_mask & (cls_gts != novel_cls_id)   # Remove the label instances that are in the novel class name list.
@@ -251,8 +279,8 @@ class OV_3D_Det(BaseModule):
                     batch_input['instances']._fields[gt_key].tensor = batch_input['instances']._fields[gt_key].tensor[valid_gt_mask]
                 else:
                     batch_input['instances']._fields[gt_key] = batch_input['instances']._fields[gt_key][valid_gt_mask]
-
-        return batched_inputs, novel_cls_id_list
+                    
+        return batched_inputs
         
 
 def pseudo_with():
