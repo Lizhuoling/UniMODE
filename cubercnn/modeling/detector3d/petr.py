@@ -305,8 +305,7 @@ class PETR_HEAD(nn.Module):
         self.register_buffer('voxel_size', torch.Tensor([row[2] for row in [self.x_bound, self.y_bound, self.z_bound]]))
         self.register_buffer('voxel_coord', torch.Tensor([row[0] + row[2] / 2.0 for row in [self.x_bound, self.y_bound, self.z_bound]]))
         self.register_buffer('voxel_num', torch.LongTensor([(row[1] - row[0]) / row[2]for row in [self.x_bound, self.y_bound, self.z_bound]]))
-        self.register_buffer('frustum', self.create_frustum())
-        self.depth_channels, _, _, _ = self.frustum.shape
+        self.depth_channels = torch.arange(*self.d_bound, dtype=torch.float).shape[0]
         
         self.pos2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
         self.bev_pos2d_encoder = nn.Sequential(
@@ -465,9 +464,9 @@ class PETR_HEAD(nn.Module):
 
         return glip_bbox_emb
 
-    def create_frustum(self):
-        ogfW, ogfH = self.cfg.INPUT.RESIZE_TGT_SIZE
-        fH, fW = ogfH // self.downsample_factor, ogfW // self.downsample_factor
+    def create_frustum(self, img_shape_after_aug, feat_shape):
+        ogfW, ogfH = img_shape_after_aug
+        fW, fH = feat_shape
         d_coords = torch.arange(*self.d_bound, dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # Left shape: (D, H, W)
         D, _, _ = d_coords.shape
         x_coords = torch.linspace(0, ogfW - 1, fW, dtype=torch.float).view(1, 1, fW).expand(D, fH, fW)
@@ -477,8 +476,8 @@ class PETR_HEAD(nn.Module):
         return frustum
 
     @torch.no_grad()
-    def get_geometry(self, Ks, bev_adaptive_reg, B):
-        points = self.frustum[None].expand(B, -1, -1, -1, -1).clone()   # Left shape: (B, D, H, W, 3)
+    def get_geometry(self, Ks, bev_adaptive_reg, B, img_shape_after_aug, feat_shape):
+        points = self.create_frustum(img_shape_after_aug, feat_shape)[None].expand(B, -1, -1, -1, -1).cuda()   # Left shape: (B, D, H, W, 3)
 
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
             ori_position_range = torch.Tensor(self.position_range).cuda()[None].expand(B, -1)    # Left shape: (B, 6)
@@ -504,8 +503,7 @@ class PETR_HEAD(nn.Module):
         depth = depth_and_feat[:, :self.depth_channels].softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)
         img_feat_with_depth = depth.unsqueeze(1) * depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)].unsqueeze(2)  # Left shape: (B, C, D, H, W)
         img_feat_with_depth = img_feat_with_depth.permute(0, 2, 3, 4, 1)    # Left shape: (B, D, H, W, C)
-
-        geom_xyz = self.get_geometry(Ks, bev_adaptive_reg, B)    # Left shape: (B, D, H, W, 3)
+        geom_xyz = self.get_geometry(Ks, bev_adaptive_reg, B, ori_img_resolution[0].int().cpu().numpy(), (img_mask.shape[2], img_mask.shape[1]))    # Left shape: (B, D, H, W, 3)
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
             voxel_coord = (self.voxel_coord[None].expand(B, -1) * bev_adaptive_reg[:, :3] + bev_adaptive_reg[:, 3:])[:, None, None, None]
             voxel_size = (self.voxel_size[None].expand(B, -1) * bev_adaptive_reg[:, :3] + bev_adaptive_reg[:, 3:])[:, None, None, None]
