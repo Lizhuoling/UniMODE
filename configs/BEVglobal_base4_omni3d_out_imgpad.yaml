@@ -2,9 +2,9 @@ _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
   TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val',)
-  #TRAIN: ('KITTI_val',)
+  #TRAIN: ('nuScenes_val', 'KITTI_val',)
   TEST: ('nuScenes_test', 'KITTI_test',)
-  #TEST: ('KITTI_val',)
+  #TEST: ('nuScenes_val', 'KITTI_val',)
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
@@ -51,7 +51,7 @@ MODEL:
       MATCHER_NAME: 'HungarianAssigner3D'
       NUM_QUERY: 200
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
-      DOWNSAMPLE_FACTOR: 16
+      DOWNSAMPLE_FACTOR: 32  # The biggest downsampling factor in the backbone.
 
       HEAD:
         OV_CLS_HEAD: True

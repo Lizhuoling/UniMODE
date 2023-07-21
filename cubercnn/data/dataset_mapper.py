@@ -124,9 +124,9 @@ class DatasetMapper3D(DatasetMapper):
         aug_input = T.AugInput(image)
         transforms = self.augmentations(aug_input)
         image = aug_input.image
-        image = self.pad_meet_downratio.get_transform(image)
-        
         image_shape = image.shape[:2]  # h, w
+
+        image = self.pad_meet_downratio.get_transform(image)
         
         # Pytorch's dataloader is efficient on torch.Tensor due to shared-memory,
         # but not efficient on large generic data structures due to the use of pickle & mp.Queue.
@@ -167,7 +167,7 @@ class Pad_DownRatio():
     def get_transform(self, image):
         bottom_pad_value = math.ceil(image.shape[0] / self.down_ratio) *  self.down_ratio - image.shape[0]
         right_pad_value = math.ceil(image.shape[1] / self.down_ratio) *  self.down_ratio - image.shape[1]
-        image = np.pad(image, pad_width = ((0, right_pad_value), (0, bottom_pad_value), (0, 0)), mode='constant')
+        image = np.pad(image, pad_width = ((0, bottom_pad_value), (0, right_pad_value), (0, 0)), mode='constant')
         return image
 
 def build_augmentation(cfg, is_train):

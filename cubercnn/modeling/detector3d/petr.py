@@ -85,7 +85,10 @@ class DETECTOR_PETR(BaseModule):
         if type(backbone_feat_list) == dict: backbone_feat_list = list(backbone_feat_list.values())
         
         if self.cfg.MODEL.DETECTOR3D.PETR.USE_NECK:
-            feat = self.img_neck(backbone_feat_list)[0]
+            try:
+                feat = self.img_neck(backbone_feat_list)[0]
+            except:
+                pdb.set_trace()
         else:
             assert 'EVA' in self.cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME
             patch_size = 14
