@@ -386,14 +386,18 @@ class PETR_HEAD(nn.Module):
 
         # One-to-one macther
         self.cls_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_WEIGHT
-        self.reg_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.REG_WEIGHT
+        self.loc_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_WEIGHT
+        self.dim_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.DIM_WEIGHT
+        self.pose_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.POSE_WEIGHT
         self.det2d_l1_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.DET_2D_L1_WEIGHT
         self.det2d_iou_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.DET_2D_GIOU_WEIGHT
         
         matcher_cfg = matcher_cfgs(cfg.MODEL.DETECTOR3D.PETR.MATCHER_NAME, cfg)
         matcher_cfg.update(dict(total_cls_num = self.total_cls_num, 
                                 cls_weight = self.cls_weight, 
-                                reg_weight = self.reg_weight,
+                                loc_weight = self.loc_weight,
+                                dim_weight = self.dim_weight,
+                                pose_weight = self.pose_weight,
                                 det2d_l1_weight = self.det2d_l1_weight,
                                 det2d_iou_weight = self.det2d_iou_weight, 
                                 uncern_range = self.uncern_range,
@@ -753,26 +757,32 @@ class PETR_HEAD(nn.Module):
 
         # One-to-One Matching between pseudo 2D labels and the remaining unmatched predictions.
         if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
-            bbox2d_preds = []
+            '''bbox2d_preds = []
             for bs, bs_bbox_preds in enumerate(bbox_preds_list):
                 bs_pose_3x3 = rotation_6d_to_matrix(bs_bbox_preds[..., self.reg_key_manager('pose')])
-                bs_corners_2d, bs_corners_3d = bs_bbox3d_preds = get_cuboid_verts(K = Ks[bs], box3d = torch.cat((bs_bbox_preds[..., self.reg_key_manager('loc')], bs_bbox_preds[..., self.reg_key_manager('dim')].exp()), dim = 1), R = bs_pose_3x3)
+                bs_corners_2d, bs_corners_3d = get_cuboid_verts(K = Ks[bs], box3d = torch.cat((bs_bbox_preds[..., self.reg_key_manager('loc')], bs_bbox_preds[..., self.reg_key_manager('dim')].exp()), dim = 1), R = bs_pose_3x3)
                 bs_corners_2d = bs_corners_2d[:, :, :2] # Left shape: (num_box, 8, 2)
                 bs_box_2d = bs_corners_2d.new_zeros(bs_corners_2d.shape[0], 2, 2)   # Left shape: (num_box, 2, 2)
-                bs_u_min, bs_u_max = bs_corners_2d[..., 0].argmin(dim = 1), bs_corners_2d[..., 0].argmax(dim = 1)
-                bs_v_min, bs_v_max = bs_corners_2d[..., 1].argmin(dim = 1), bs_corners_2d[..., 1].argmax(dim = 1)
+                bs_u_min, bs_u_max = bs_corners_2d[..., 0].argmin(dim = 1), bs_corners_2d[..., 0].argmax(dim = 1)   # bs_u_min shape: (num_box,), bs_u_max shape: (num_box,)
+                bs_v_min, bs_v_max = bs_corners_2d[..., 1].argmin(dim = 1), bs_corners_2d[..., 1].argmax(dim = 1)   # bs_v_min shape: (num_box,), bs_v_max shape: (num_box,)
                 bs_box_2d[:, 0, 0:1] = bs_corners_2d[..., 0].gather(index = bs_u_min.unsqueeze(-1), dim = 1)    # The u coordinate of left up corner
                 bs_box_2d[:, 0, 1:2] = bs_corners_2d[..., 1].gather(index = bs_v_min.unsqueeze(-1), dim = 1)    # The v coordinate of left up corner
                 bs_box_2d[:, 1, 0:1] = bs_corners_2d[..., 0].gather(index = bs_u_max.unsqueeze(-1), dim = 1)    # The u coordinate of right bottom corner
                 bs_box_2d[:, 1, 1:2] = bs_corners_2d[..., 1].gather(index = bs_v_max.unsqueeze(-1), dim = 1)    # The v coordinate of right bottom corner
-                bbox2d_preds.append(bs_box_2d)
-            
-            assign_results_2D = self.get_2D_matching(cls_scores_list, bbox2d_preds, ori_img_resolution, novel_cls_gts, assign_results)
+                bbox2d_preds.append(bs_box_2d)'''
+            proj3dcenter_preds = []
+            for bs, bs_bbox_preds in enumerate(bbox_preds_list):
+                proj_3d_center = (Ks[bs][None] @ bs_bbox_preds[..., self.reg_key_manager('loc')].unsqueeze(-1)).squeeze(-1) # Left shape: (num_box, 3)
+                proj_3d_center = proj_3d_center[:, :2] / proj_3d_center[:, 2:]  # Left shape: (num_box, 2)
+                proj_3d_center = proj_3d_center / ori_img_resolution[bs][None]  # Normalization. Left shape: (num_box, 2)
+                proj3dcenter_preds.append(proj_3d_center)
+
+            assign_results_2D = self.get_2D_matching(cls_scores_list, proj3dcenter_preds, ori_img_resolution, novel_cls_gts, assign_results)
             
 
         loss_dict = {'cls_loss_{}'.format(dec_idx): 0, 'loc_loss_{}'.format(dec_idx): 0, 'dim_loss_{}'.format(dec_idx): 0, 'pose_loss_{}'.format(dec_idx): 0}
         if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
-            loss_dict.update({'2d_iou_loss_{}'.format(dec_idx): 0})
+            loss_dict.update({'proj3dcenter_loss_{}'.format(dec_idx): 0})
 
         num_pos = 0
         num_2d_pos = 0
@@ -805,8 +815,18 @@ class PETR_HEAD(nn.Module):
             initial_reso = torch.Tensor([initial_w, initial_h, initial_w, initial_h]).to(img_reso.device)
             Ks = torch.Tensor(np.array(batched_inputs[bs]['K'])).cuda()
             Ks[0, :] = Ks[0, :] * ori_img_resolution[bs][0] / initial_w
-            Ks[1, :] = Ks[1, :] * ori_img_resolution[bs][1] / initial_h
-            corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_preds, bs_dim_preds.exp()), dim = 1), R = bs_pose_gts)
+            Ks[1, :] = Ks[1, :] * ori_img_resolution[bs][1] / initial_h'''
+            '''if novel_cls_gts[bs]['labels'].shape[0] != 0:
+                pseudo_box2d_gt = novel_cls_gts[bs]['bbox'] # Left shape: (num_box, 4)
+                pseudo_box2d_gt = torch.cat((ori_img_resolution[bs], ori_img_resolution[bs]), dim = 0)[None] * pseudo_box2d_gt
+                pseudo_box2d_gt = pseudo_box2d_gt.int().cpu().numpy()
+                for box in pseudo_box2d_gt:
+                    cv2.rectangle(img, box[0:2], box[2:4], color=(255, 0, 0), thickness = 2)
+                cv2.imwrite('vis.png', img)
+                pdb.set_trace()
+            else:
+                continue'''
+            '''corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_preds, bs_dim_preds.exp()), dim = 1), R = bs_pose_gts)
             corners_2d = corners_2d[:, :, :2].detach()
             box2d = torch.cat((corners_2d.min(dim = 1)[0], corners_2d.max(dim = 1)[0]), dim = -1)
             for box in box2d:
@@ -827,26 +847,33 @@ class PETR_HEAD(nn.Module):
             bs_cls_gts_onehot[pred_idxs] = bs_valid_cls_gts_onehot
             if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
                 bs_2d_cls_gts_onehot = F.one_hot(novel_cls_gts[bs]['labels'][gt2d_idxs], num_classes = self.total_cls_num)  # Left shape: (num_2d_gt, num_cls)
-                bs_cls_gts_onehot[pred2d_idxs] = bs_2d_cls_gts_onehot
+                bs_cls_gts_onehot[pred2d_idxs] = bs_2d_cls_gts_onehot.clone()
             loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * torchvision.ops.sigmoid_focal_loss(bs_cls_scores, bs_cls_gts_onehot.float(), reduction = 'none').sum()
             
             # Localization loss
-            loss_dict['loc_loss_{}'.format(dec_idx)] += self.reg_weight * (math.sqrt(2) * self.reg_loss(bs_loc_preds, bs_loc_gts)\
+            loss_dict['loc_loss_{}'.format(dec_idx)] += self.loc_weight * (math.sqrt(2) * self.reg_loss(bs_loc_preds, bs_loc_gts)\
                                                         .sum(-1, keepdim=True) / bs_uncern_preds.exp() + bs_uncern_preds).sum()
             
             # Dimension loss
-            loss_dict['dim_loss_{}'.format(dec_idx)] += self.reg_weight * self.reg_loss(bs_dim_preds, bs_dim_gts.log()).sum()
+            loss_dict['dim_loss_{}'.format(dec_idx)] += self.dim_weight * self.reg_loss(bs_dim_preds, bs_dim_gts.log()).sum()
 
             # Pose loss
-            loss_dict['pose_loss_{}'.format(dec_idx)] += self.reg_weight * (1 - so3_relative_angle(bs_pose_preds, bs_pose_gts, eps=1, cos_angle=True)).sum()
+            loss_dict['pose_loss_{}'.format(dec_idx)] += self.pose_weight * (1 - so3_relative_angle(bs_pose_preds, bs_pose_gts, eps=1, cos_angle=True)).sum()
 
             # 2D IOU loss between 2D boxes converted from 3D box predictions and pseudo 2D box GTs.
             if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
-                box2d_uvuv_preds = (bbox2d_preds[bs][pred2d_idxs] / ori_img_resolution[bs][None, None]).view(-1, 4)   # Left shape: (num_2d_gt, 4)
+                '''box2d_uvuv_preds = (bbox2d_preds[bs][pred2d_idxs] / ori_img_resolution[bs][None, None]).view(-1, 4)   # Left shape: (num_2d_gt, 4)
                 box2d_uvuv_gts = novel_cls_gts[bs]['bbox'][gt2d_idxs]
                 iou_loss = 1 - torch.diag(generalized_box_iou(box2d_uvuv_preds, box2d_uvuv_gts)) 
                 iou_loss = F.relu(iou_loss - (1 - self.cfg.MODEL.DETECTOR3D.PETR.HEAD.DET2D_IOU_THRE))  # When IOU is bigger than DET2D_IOU_THRE, no loss punishment is applied.
                 loss_dict['2d_iou_loss_{}'.format(dec_idx)] += self.det2d_iou_weight * iou_loss.sum()
+                loss_dict['2d_l1_loss_{}'.format(dec_idx)] += self.det2d_l1_weight * self.reg_loss(box2d_uvuv_preds, box2d_uvuv_gts).sum()'''
+                box2d_gt = novel_cls_gts[bs]['bbox'][gt2d_idxs].view(-1, 2, 2) # Left shape: (num_2d_gt, 2, 2)
+                box_center_gt = box2d_gt.mean(dim = 1)  # Left shape: (num_2d_gt, 2)
+                box2d_wh = (box2d_gt[:, 1, :] - box2d_gt[:, 0, :])  # Left shape: (num_2d_gt, 2)
+                box2d_area = box2d_wh.sum(-1)    # Left shape: (num_gt)
+                center_loss_threshold = self.cfg.MODEL.DETECTOR3D.PETR.HEAD.DET2D_AREA_FACTOR * box2d_area  # Left shape: (num_gt)
+                loss_dict['proj3dcenter_loss_{}'.format(dec_idx)] +=  self.det2d_l1_weight * F.relu(self.reg_loss(proj3dcenter_preds[bs][pred2d_idxs], box_center_gt).sum(-1) - center_loss_threshold).sum()
             
             num_pos += gt_idxs.shape[0]
             if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
@@ -858,7 +885,7 @@ class PETR_HEAD(nn.Module):
         for key in loss_dict.keys():
             if 'cls_loss' in key:
                 loss_dict[key] = loss_dict[key] / max(num_pos + num_2d_pos, 1)
-            elif '2d_iou_loss' in key:
+            elif 'proj3dcenter_loss' in key:
                 loss_dict[key] = loss_dict[key] / max(num_2d_pos, 1)
             else:
                 loss_dict[key] = loss_dict[key] / max(num_pos, 1)
@@ -883,14 +910,14 @@ class PETR_HEAD(nn.Module):
         assign_result = self.matcher.assign(bbox_preds, cls_scores, batched_input, self.reg_key_manager, ori_img_resolution, h_scale_ratio, Ks)
         return assign_result
 
-    def get_2D_matching(self, cls_scores_list, bbox2d_preds, ori_img_resolutions, novel_cls_gts, assign_results):
+    def get_2D_matching(self, cls_scores_list, proj3dcenter_preds, ori_img_resolution, novel_cls_gts, assign_results):
         bs = len(cls_scores_list)
-        ori_img_resolutions = torch.split(ori_img_resolutions, 1, dim = 0)
-        assign_results = multi_apply(self.get_2D_matching_single, cls_scores_list, bbox2d_preds, novel_cls_gts, ori_img_resolutions, assign_results)[0]
+        ori_img_resolutions = torch.split(ori_img_resolution, 1, dim = 0)
+        assign_results = multi_apply(self.get_2D_matching_single, cls_scores_list, proj3dcenter_preds, novel_cls_gts, ori_img_resolutions, assign_results)[0]
         return assign_results
 
-    def get_2D_matching_single(self, cls_scores, bbox2d_pred, novel_cls_gt, ori_img_resolution, assign_result):
-        assign_results = self.matcher_2D.assign(cls_scores, bbox2d_pred, novel_cls_gt, ori_img_resolution, assign_result)
+    def get_2D_matching_single(self, cls_scores, proj3dcenter_pred, novel_cls_gt, ori_img_resolution, assign_result):
+        assign_results = self.matcher_2D.assign(cls_scores, proj3dcenter_pred, novel_cls_gt, ori_img_resolution, assign_result)
         return assign_results
 
     def remove_instance_out_range(self, batched_inputs):

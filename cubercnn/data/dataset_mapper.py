@@ -2,6 +2,7 @@
 import copy
 import pdb
 import math 
+import copy
 import torch
 import cv2
 import numpy as np
@@ -78,7 +79,7 @@ class DatasetMapper3D(DatasetMapper):
         else:
             self.color_aug = None
 
-        self.pad_meet_downratio = Pad_DownRatio(cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR)
+        self.pad_meet_downratio = Resize_DownRatio(cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR)
 
     @classmethod
     def from_config(cls, cfg, is_train: bool = True):
@@ -117,16 +118,14 @@ class DatasetMapper3D(DatasetMapper):
         
         image = detection_utils.read_image(dataset_dict["file_name"], format=self.image_format)
         detection_utils.check_image_size(dataset_dict, image)   # Check whether the image shape match the height and width specified in dataset_dict
-
         if self.color_aug != None:
             image = self.color_aug(image)
 
         aug_input = T.AugInput(image)
         transforms = self.augmentations(aug_input)
         image = aug_input.image
-        image_shape = image.shape[:2]  # h, w
-
         image = self.pad_meet_downratio.get_transform(image)
+        image_shape = image.shape[:2]  # h, w
         
         # Pytorch's dataloader is efficient on torch.Tensor due to shared-memory,
         # but not efficient on large generic data structures due to the use of pickle & mp.Queue.
@@ -160,14 +159,15 @@ class DatasetMapper3D(DatasetMapper):
 
         return dataset_dict
 
-class Pad_DownRatio():
+class Resize_DownRatio():
     def __init__(self, down_ratio):
         self.down_ratio = down_ratio
 
     def get_transform(self, image):
-        bottom_pad_value = math.ceil(image.shape[0] / self.down_ratio) *  self.down_ratio - image.shape[0]
-        right_pad_value = math.ceil(image.shape[1] / self.down_ratio) *  self.down_ratio - image.shape[1]
-        image = np.pad(image, pad_width = ((0, bottom_pad_value), (0, right_pad_value), (0, 0)), mode='constant')
+        new_height = math.ceil(image.shape[0] / self.down_ratio) *  self.down_ratio
+        new_width = math.ceil(image.shape[1] / self.down_ratio) *  self.down_ratio
+        image = cv2.resize(image, (new_width, new_height))
+        #image = np.pad(image, pad_width = ((0, bottom_pad_value), (0, right_pad_value), (0, 0)), mode='constant')
         return image
 
 def build_augmentation(cfg, is_train):

@@ -5,8 +5,8 @@ DATASETS:
   #TRAIN: ('KITTI_val',)
   TEST: ('nuScenes_test', 'KITTI_test',)
   #TEST: ('KITTI_val',)
-  CATEGORY_NAMES: ('trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone',)
-  NOVEL_CLASS_NAMES: ('cyclist', 'pedestrian', 'bicycle',)
+  CATEGORY_NAMES: ('trailer', 'bus', 'car', 'truck', 'van', 'traffic cone',)
+  NOVEL_CLASS_NAMES: ('cyclist', 'pedestrian', 'bicycle', 'motorcycle', 'barrier')
 
 INPUT:
   RESIZE_TGT_SIZE: (1280, 1024)
@@ -62,7 +62,7 @@ MODEL:
         DET_2D_GIOU_WEIGHT: 2.0
         
         DET2D_FROM: 'GT2D'  # 'GLIP' or 'GT2D'
-        DET2D_IOU_THRE: 1.0
+        DET2D_AREA_FACTOR: 0.8
 
         ENC_NUM: 1
         DEC_NUM: 6
