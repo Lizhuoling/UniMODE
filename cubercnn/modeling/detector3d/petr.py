@@ -522,7 +522,10 @@ class PETR_HEAD(nn.Module):
         # Notably, the BEV feature shape should be (B, C bev_z, bev_x) rather than (B, C bev_y, bev_x).
         bev_feat = voxel_pooling_train(geom_xyz.contiguous(), img_feat_with_depth.contiguous(), self.voxel_num.cuda())   # Left shape: (B, C, bev_z, bev_x)
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
-        bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
+        try:
+            bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
+        except:
+            pdb.set_trace()
         bev_feat_pos = self.bev_pos2d_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
 
         # For vis

@@ -21,7 +21,7 @@ from detectron2.engine import (
     default_writers, 
     launch
 )
-#from detectron2.solver import build_lr_scheduler
+from detectron2.solver import build_lr_scheduler as detectron_build_lr_scheduler
 from detectron2.utils.events import EventStorage
 from detectron2.utils.logger import setup_logger
 
@@ -130,7 +130,10 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
     model.train()
 
     optimizer = build_optimizer(cfg, model)
-    scheduler = build_lr_scheduler(cfg, optimizer)
+    if cfg.MODEL.GLIP_MODEL.MODEL.META_ARCHITECTURE == "GeneralizedRCNN":
+        scheduler = detectron_build_lr_scheduler(cfg, optimizer)
+    else:
+        scheduler = build_lr_scheduler(cfg, optimizer)
     if cfg.SOLVER.LR_SCHEDULER_NAME == 'CosineAnnealing':
         scheduler, lr_warmup_scheduler = scheduler
 

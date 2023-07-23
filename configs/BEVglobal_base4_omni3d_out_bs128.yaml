@@ -8,18 +8,14 @@ DATASETS:
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
-  #RESIZE_TGT_SIZE: (1280, 1024)
-  MIN_SIZE_TRAIN: (256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512, 528, 544, 560, 576, 592, 608, 624, 640,)
-  MIN_SIZE_TEST: 512
-  MAX_SIZE_TRAIN: 4096
-  MAX_SIZE_TEST: 4096
+  RESIZE_TGT_SIZE: (1280, 720)
   RANDOM_FLIP: "none"
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 128
   TYPE: "mmcv_AdamW"
-  BASE_LR: 4e-4
+  BASE_LR: 8e-4
   WEIGHT_DECAY: 1e-2
   MAX_ITER: 58000
   VIRTUAL_EPOCHS: 20

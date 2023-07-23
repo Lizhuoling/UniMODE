@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import Dict, List, Tuple
 import torch
+import pdb
 from typing import List, Tuple, Union
 import torch.nn.functional as F
 from detectron2.config import configurable
@@ -58,7 +59,7 @@ class RPNWithIgnore(RPN):
             gt_boxes_i: ground-truth boxes for i-th image
             gt_boxes_ign_i: ground-truth ignore boxes for i-th image
             """
-
+            
             match_quality_matrix = retry_if_cuda_oom(pairwise_iou)(gt_boxes_i, anchors)
             matched_idxs, gt_labels_i = retry_if_cuda_oom(self.anchor_matcher)(match_quality_matrix)
             
