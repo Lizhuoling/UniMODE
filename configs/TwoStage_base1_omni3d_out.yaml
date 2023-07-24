@@ -52,6 +52,10 @@ MODEL:
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
       DOWNSAMPLE_FACTOR: 16
 
+      CENTER_PROPOSAL:
+        USE_CENTER_PROPOSAL: False
+        PROPOSAL_NUMBER: 100
+
       HEAD:
         OV_CLS_HEAD: False
         UNCERN_RANGE: [-10, 10]

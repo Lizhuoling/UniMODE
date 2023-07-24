@@ -40,6 +40,7 @@ from cubercnn.util.util import box_cxcywh_to_xyxy, generalized_box_iou
 from cubercnn.util.math_util import get_cuboid_verts
 from cubercnn.modeling.detector3d.depthnet import DepthNet
 from voxel_pooling.voxel_pooling_train import voxel_pooling_train
+from cubercnn.modeling.detector3d.center_head import CENTER_HEAD
 
 class DETECTOR_PETR(BaseModule):
     def __init__(self, cfg):
@@ -74,6 +75,9 @@ class DETECTOR_PETR(BaseModule):
                 petr_head_inchannel = neck_cfg['out_channels']
         else:
             petr_head_inchannel = self.img_backbone.embed_dim
+
+        if cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            self.center_head = CENTER_HEAD(cfg, in_channels = petr_head_inchannel)
         
         self.petr_head = PETR_HEAD(cfg, in_channels = petr_head_inchannel)
 
@@ -418,7 +422,7 @@ class PETR_HEAD(nn.Module):
 
         # Loss functions
         #self.cls_loss = nn.BCEWithLogitsLoss(reduction = 'none')
-        #self.cls_loss = build_loss({'type': 'FocalLoss', 'use_sigmoid': True, 'gamma': 2.0, 'alpha': 0.25, 'loss_weight': 1.0})
+        #self.mmdet_cls_loss = build_loss({'type': 'FocalLoss', 'use_sigmoid': True, 'gamma': 2.0, 'alpha': 0.25, 'loss_weight': 1.0})
         #self.reg_loss = build_loss({'type': 'L1Loss', 'loss_weight': 1.0})
         self.reg_loss = nn.L1Loss(reduction = 'none')
         self.iou_loss = build_loss({'type': 'GIoULoss', 'loss_weight': 0.0})
@@ -615,10 +619,7 @@ class PETR_HEAD(nn.Module):
     
     def inference(self, detector_out, batched_inputs, ori_img_resolution):
         cls_scores = detector_out['all_cls_scores'][-1]
-        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.OV_CLS_HEAD:
-            cls_scores = cls_scores.sigmoid() # Left shape: (B, num_query, cls_num)
-        else:
-            cls_scores = cls_scores.softmax(-1)
+        cls_scores = cls_scores.sigmoid() # Left shape: (B, num_query, cls_num)
         bbox_preds = detector_out['all_bbox_preds'][-1] # Left shape: (B, num_query, attr_num)
         B = cls_scores.shape[0]
         
