@@ -47,7 +47,6 @@ class OV_3D_Det(BaseModule):
         ### Build the GLIP model ###
         self.glip_cfg = copy.deepcopy(cfg.MODEL.GLIP_MODEL)
         self.glip_cfg.freeze()
-        
         if self.glip_cfg.USE_GLIP:
             self.glip_model = build_detection_model(self.glip_cfg, cfg)
 
@@ -118,11 +117,14 @@ class OV_3D_Det(BaseModule):
 
     @auto_fp16(apply_to=('images',), out_fp32=True)
     def forward_glip(self, images, captions, positive_map_label_to_token):
-        glip_outs, glip_text_emb, glip_visual_emb = self.glip_model(images, captions=captions, positive_map=positive_map_label_to_token)
-        return glip_outs, glip_text_emb, glip_visual_emb
+        glip_outs = self.glip_model(images, captions=captions, positive_map=positive_map_label_to_token)
+        return glip_outs
 
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
-        self.forward_once()
+        if self.cfg.MODEL.GLIP_MODEL.USE_GLIP:
+            self.forward_once()
+        else:
+            self.class_name_emb = None
 
         images = self.preprocess_image(batched_inputs)
         ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # Left shape: (bs, 2)
@@ -150,8 +152,8 @@ class OV_3D_Det(BaseModule):
                     
                 if self.glip_model.training:
                     self.glip_model.eval()
-                #glip_outs, glip_text_emb, glip_visual_emb = self.glip_model(images.tensor, captions=captions, positive_map=positive_map_label_to_token)
-                glip_outs, glip_text_emb, glip_visual_emb = self.forward_glip(images.tensor, captions, positive_map_label_to_token)
+                glip_outs = self.forward_glip(images.tensor, captions, positive_map_label_to_token)
+                
                 for cnt, glip_out in enumerate(glip_outs):
                     glip_out.extra_fields['cls_emb'] = self.extract_cls_emb(glip_out.extra_fields['labels'], positive_map_label_to_token)
                     #vis_2d_det(boxlist = glip_out, img = batched_inputs[cnt]['image'].permute(1, 2, 0).numpy(), class_names = self.cfg.DATASETS.CATEGORY_NAMES) 
@@ -163,7 +165,6 @@ class OV_3D_Det(BaseModule):
             glip_results['cls_emb'] = torch.stack([ele.get_field('cls_emb') for ele in glip_outs], dim  = 0)  # Left shape: (bs, box_num, cls_emb_len)
         else:
             glip_results = {}
-            glip_text_emb, glip_visual_emb = None, None
 
         if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL and self.training:
             novel_cls_gts = []
@@ -196,7 +197,7 @@ class OV_3D_Det(BaseModule):
             batched_inputs = self.remove_novel_gts(batched_inputs, novel_cls_id_list)
         
         # 3D Det
-        detector_out = self.detector(images, batched_inputs, glip_results, self.class_name_emb, glip_text_emb, glip_visual_emb)
+        detector_out = self.detector(images, batched_inputs, glip_results, self.class_name_emb)
 
         # For survey the data statistics. For debug
         '''for batch in batched_inputs:

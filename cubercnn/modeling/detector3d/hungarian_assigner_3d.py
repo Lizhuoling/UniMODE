@@ -15,16 +15,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
-#from mmdet.models.task_modules.assigners import AssignResult, BaseAssigner
-#from mmdet.models.task_modules import BBOX_ASSIGNERS, build_match_cost
-#from mmdet.models.layers.transformer import inverse_sigmoid
-
 from mmdet.core.bbox.builder import BBOX_ASSIGNERS
-from mmdet.core.bbox.assigners import AssignResult
-from mmdet.core.bbox.assigners import BaseAssigner
+from mmdet.core.bbox.assigners import AssignResult, BaseAssigner
 from mmdet.core.bbox.match_costs import build_match_cost
 from mmdet.models.utils.transformer import inverse_sigmoid
-from mmdet.core.bbox.match_costs import build_match_cost
 
 from scipy.optimize import linear_sum_assignment
 from pytorch3d.transforms import rotation_6d_to_matrix
@@ -67,8 +61,8 @@ class HungarianAssigner3D(BaseAssigner):
         self.total_cls_num = total_cls_num
         self.uncern_range = uncern_range
         self.cfg = cfg
-        #self.cls_loss = build_match_cost({'type': 'FocalLossCost', 'weight': 1.0})
-        #self.reg_cost = build_match_cost({'type': 'BBox3DL1Cost', 'weight': 1.0})
+        self.mmdet_cls_loss = build_match_cost({'type': 'FocalLossCost', 'weight': 1.0})
+        #self.mmdet_reg_cost = build_match_cost({'type': 'BBox3DL1Cost', 'weight': 1.0})
         self.reg_loss = nn.L1Loss(reduction = 'none')
         self.iou_cost = build_match_cost({'type': 'IoUCost', 'weight': 1.0})
 
@@ -101,9 +95,12 @@ class HungarianAssigner3D(BaseAssigner):
             indices.append([[], []])
             return [(torch.as_tensor(i, dtype = torch.int64), torch.as_tensor(j, dtype = torch.int64)) for i, j in indices]
 
-        expand_cls_scores = cls_scores.unsqueeze(1).expand(-1, num_gts, -1)    # Left shape: (num_query, num_gt, num_cls)
-        expand_cls_gts = F.one_hot(cls_gts, num_classes = self.total_cls_num)[None].expand(num_preds, -1, -1)   # Left shape: (num_query, num_gt, num_cls)
-        cls_cost = self.cls_weight * torchvision.ops.sigmoid_focal_loss(expand_cls_scores, expand_cls_gts.float(), reduction = 'none').sum(-1)
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.OV_CLS_HEAD: # OV head uses sigmoid loss.
+            expand_cls_scores = cls_scores.unsqueeze(1).expand(-1, num_gts, -1)    # Left shape: (num_query, num_gt, num_cls)
+            expand_cls_gts = F.one_hot(cls_gts, num_classes = self.total_cls_num)[None].expand(num_preds, -1, -1)   # Left shape: (num_query, num_gt, num_cls)
+            cls_cost = self.cls_weight * torchvision.ops.sigmoid_focal_loss(expand_cls_scores, expand_cls_gts.float(), reduction = 'none').sum(-1)
+        else:   # Non-OV head uses softmax head.
+            cls_cost = self.cls_weight * self.mmdet_cls_loss(cls_scores, cls_gts)
         
         loc_preds = loc_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 3)
         uncern_preds = uncern_preds.unsqueeze(1).expand(-1, num_gts, -1)  # Left shape: (num_query, num_gt, 1)

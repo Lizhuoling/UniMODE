@@ -97,7 +97,7 @@ class DETECTOR_PETR(BaseModule):
             feat = feat.permute(0, 2, 1).reshape(feat.shape[0], -1, feat_h, feat_w).contiguous() # Left shape: (B, C, H, W)
         return feat
 
-    def forward(self, images, batched_inputs, glip_results, class_name_emb, glip_text_emb, glip_visual_emb):
+    def forward(self, images, batched_inputs, glip_results, class_name_emb):
         Ks, scale_ratios = self.transform_intrinsics(images, batched_inputs)    # Transform the camera intrsincis based on input image augmentations.
         masks = self.generate_mask(images)  # Generate image mask for detr. masks shape: (b, h, w)
         pad_img_resolution = (images.tensor.shape[3],images.tensor.shape[2])
@@ -121,6 +121,7 @@ class DETECTOR_PETR(BaseModule):
             gt_rot3d = batched_inputs[batch_id]['instances']._fields['gt_poses'][gt_cnt].cpu()
             draw_3d_box(img, K.cpu().numpy(), torch.cat((gt_center3d, gt_dim3d), dim = 0).numpy(), gt_rot3d.numpy())
         cv2.imwrite('vis.png', img)
+        print("Whether flip: {}".format(batched_inputs[batch_id]['horizontal_flip_flag']))
         pdb.set_trace()'''
         
         feat = self.extract_feat(imgs = images.tensor, batched_inputs = batched_inputs)
@@ -128,8 +129,6 @@ class DETECTOR_PETR(BaseModule):
         petr_outs = self.petr_head(feat, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs,
             pad_img_resolution = pad_img_resolution, 
             ori_img_resolution = ori_img_resolution, 
-            glip_text_emb = glip_text_emb, 
-            glip_visual_emb = glip_visual_emb,
         )
         
         return petr_outs
@@ -502,7 +501,7 @@ class PETR_HEAD(nn.Module):
         points = (Ks.inverse() @ points).squeeze(-1)    # Left shape: (B, D, H, W, 3)
         return points
 
-    def forward(self, feat, glip_results, class_name_emb, Ks, scale_ratios, img_mask, batched_inputs, pad_img_resolution, ori_img_resolution, glip_text_emb, glip_visual_emb):
+    def forward(self, feat, glip_results, class_name_emb, Ks, scale_ratios, img_mask, batched_inputs, pad_img_resolution, ori_img_resolution,):
         B = feat.shape[0]
         img_mask = F.interpolate(img_mask[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
 
@@ -557,32 +556,10 @@ class PETR_HEAD(nn.Module):
             glip_initialized_tgt = tgt[:, :glip_box_num].clone() + glip_bbox_emb + glip_cls_emb + glip_score_emb
             tgt = torch.cat((glip_initialized_tgt, tgt[:, glip_box_num:]), dim = 1) # Left shape: (B, num_query, L) 
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'vision':
-            glip_visual_feat =  glip_visual_emb[self.cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL]
-            glip_visual_feat = self.glip_vision_adapter(glip_visual_feat.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)    # Left shape: (B, C, feat_h, feat_w)
-            _, _, glip_vision_h, glip_vision_w = glip_visual_feat.shape
-            glip_pos_embed, _ = self.position_embeding(glip_visual_feat, coords_d, Ks, masks.new_zeros(B, glip_vision_h, glip_vision_w), (glip_vision_w, glip_vision_h), glip_feat_flag = True)
-            glip_text_feat = None
-        elif self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'language':
-            glip_visual_feat, glip_pos_embed = None, None
-            glip_text_feat = self.glip_text_adapter(glip_text_emb).permute(1, 0, 2)   # Left shape: (L, B, C)
-        elif self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'VL':
-            glip_visual_feat =  glip_visual_emb[self.cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL]
-            glip_visual_feat = self.glip_vision_adapter(glip_visual_feat.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)    # Left shape: (B, C, feat_h, feat_w)
-            _, _, glip_vision_h, glip_vision_w = glip_visual_feat.shape
-            glip_pos_embed, _ = self.position_embeding(glip_visual_feat, coords_d, Ks, masks.new_zeros(B, glip_vision_h, glip_vision_w), (glip_vision_w, glip_vision_h), glip_feat_flag = True)
-            glip_text_feat = self.glip_text_adapter(glip_text_emb).permute(1, 0, 2)   # Left shape: (L, B, C)
-        else:
-            glip_visual_feat, glip_pos_embed, glip_text_feat = None, None, None
-        
-        if self.cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DETR_TRANSFORMER':
-            outs_dec, _ = self.transformer(bev_feat, bev_mask, query_embeds, bev_feat_pos, self.reg_branches, batched_inputs, \
-                glip_visual_feat = glip_visual_feat, glip_pos_embed = glip_pos_embed, glip_text_feat = glip_text_feat) # Left shape: (num_layers, bs, num_query, dim)
-        elif self.cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DEFORMABLE_TRANSFORMER':
-            query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
+        query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
 
-            outs_dec, init_reference, inter_references, _, _ = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
-                reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution, glip_visual_feat = glip_visual_feat, glip_visual_pos_embed = glip_pos_embed, glip_text_feat = glip_text_feat)
+        outs_dec, init_reference, inter_references, _, _ = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
+            reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
         
         outs_dec = torch.nan_to_num(outs_dec)
 
@@ -637,7 +614,11 @@ class PETR_HEAD(nn.Module):
         return outs
     
     def inference(self, detector_out, batched_inputs, ori_img_resolution):
-        cls_scores = detector_out['all_cls_scores'][-1].sigmoid() # Left shape: (B, num_query, cls_num)
+        cls_scores = detector_out['all_cls_scores'][-1]
+        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.OV_CLS_HEAD:
+            cls_scores = cls_scores.sigmoid() # Left shape: (B, num_query, cls_num)
+        else:
+            cls_scores = cls_scores.softmax(-1)
         bbox_preds = detector_out['all_bbox_preds'][-1] # Left shape: (B, num_query, attr_num)
         B = cls_scores.shape[0]
         

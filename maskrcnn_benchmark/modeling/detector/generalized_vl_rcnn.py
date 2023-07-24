@@ -318,7 +318,7 @@ class GeneralizedVLRCNN(nn.Module):
             losses.update(proposal_losses)
             return losses
         
-        return result, text_emb, visual_emb
+        return result #, text_emb, visual_emb
 
     def _forward_language_parallel(self, captions=None, targets=None,
             device=None, positive_map=None):
