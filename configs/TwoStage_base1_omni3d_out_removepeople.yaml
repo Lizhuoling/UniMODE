@@ -1,11 +1,11 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
+  TRAIN: ('nuScenes_train', 'KITTI_train',)
   #TRAIN: ('KITTI_val',)
   TEST: ('nuScenes_test', 'KITTI_test')
   #TEST: ('KITTI_val',)
-  CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
+  CATEGORY_NAMES: ('trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone',)
 
 INPUT:
   RESIZE_TGT_SIZE: (1280, 1024)
