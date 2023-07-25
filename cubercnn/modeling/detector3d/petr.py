@@ -89,10 +89,7 @@ class DETECTOR_PETR(BaseModule):
         if type(backbone_feat_list) == dict: backbone_feat_list = list(backbone_feat_list.values())
         
         if self.cfg.MODEL.DETECTOR3D.PETR.USE_NECK:
-            try:
-                feat = self.img_neck(backbone_feat_list)[0]
-            except:
-                pdb.set_trace()
+            feat = self.img_neck(backbone_feat_list)[0]
         else:
             assert 'EVA' in self.cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME
             patch_size = 14
@@ -123,26 +120,40 @@ class DETECTOR_PETR(BaseModule):
             gt_center3d = gt_3d[6:9].cpu()
             gt_dim3d = gt_3d[3:6].cpu()
             gt_rot3d = batched_inputs[batch_id]['instances']._fields['gt_poses'][gt_cnt].cpu()
-            draw_3d_box(img, K.cpu().numpy(), torch.cat((gt_center3d, gt_dim3d), dim = 0).numpy(), gt_rot3d.numpy())
-        cv2.imwrite('vis.png', img)
+            draw_3d_box(img, K.cpu().numpy(), torch.cat((gt_center3d, gt_dim3d), dim = 0).numpy(), gt_rot3d.numpy()) d
+        #box2d_centers = (batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] * self.cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR).int().cpu().numpy()
+        #for box_center in box2d_centers:
+        #    cv2.circle(img, box_center, radius = 3, color = (0, 0, 255), thickness = -1)
         print("Whether flip: {}".format(batched_inputs[batch_id]['horizontal_flip_flag']))
         pdb.set_trace()'''
         
         feat = self.extract_feat(imgs = images.tensor, batched_inputs = batched_inputs)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            center_head_out = self.center_head(feat, Ks)
+        else:
+            center_head_out = None
         
-        petr_outs = self.petr_head(feat, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs,
+        petr_out = self.petr_head(feat, glip_results, class_name_emb, Ks, scale_ratios, masks, batched_inputs,
             pad_img_resolution = pad_img_resolution, 
             ori_img_resolution = ori_img_resolution, 
+            center_head_out = center_head_out,
         )
         
-        return petr_outs
+        return dict(
+            petr_out = petr_out,
+            center_head_out = center_head_out,
+            Ks = Ks,
+        )
 
     def loss(self, detector_out, batched_inputs, ori_img_resolution, novel_cls_gts = None):
-        loss_dict = self.petr_head.loss(detector_out, batched_inputs, ori_img_resolution, novel_cls_gts)
+        center_head_loss_dict = self.center_head.loss(detector_out['center_head_out'], detector_out['Ks'], batched_inputs)
+        loss_dict = self.petr_head.loss(detector_out['petr_out'], batched_inputs, ori_img_resolution, novel_cls_gts)
+        loss_dict.update(center_head_loss_dict)
         return loss_dict
     
     def inference(self, detector_out, batched_inputs, ori_img_resolution):
-        inference_results = self.petr_head.inference(detector_out, batched_inputs, ori_img_resolution)
+        inference_results = self.petr_head.inference(detector_out['petr_out'], batched_inputs, ori_img_resolution)
         return inference_results
 
     def transform_intrinsics(self, images, batched_inputs):
@@ -324,14 +335,13 @@ class PETR_HEAD(nn.Module):
 
         # Generating query heads
         self.lang_dim = cfg.MODEL.GLIP_MODEL.MODEL.LANGUAGE_BACKBONE.LANG_DIM
-        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
-            self.glip_cls_emb_mlp = nn.Linear(self.lang_dim, self.embed_dims)
-            self.glip_box_emb_mlp = nn.Sequential(
-                nn.Linear(6 * self.depth_channels, self.embed_dims),
+        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            self.center_conf_emb = nn.Linear(1, self.embed_dims)
+            self.center_xyz_emb = nn.Sequential(
+                nn.Linear(self.embed_dims*3//2, self.embed_dims),
                 nn.ReLU(),
                 nn.Linear(self.embed_dims, self.embed_dims),
             )
-            self.glip_conf_emb = nn.Linear(1, self.embed_dims)
 
         self.reference_points = nn.Embedding(self.num_query, 3)
         self.query_embedding = nn.Sequential(
@@ -456,24 +466,6 @@ class PETR_HEAD(nn.Module):
         nn.init.uniform_(self.reference_points.weight.data, 0, 1)
         self.reference_points.weight.requires_grad = False
 
-    def box_2d_emb(self, glip_bbox, Ks):
-        '''
-        Input:
-            glip_bbox: The 2d boxes produced by GLIP. shape: (B, num_box, 4)
-            Ks: Rescaled intrinsics. shape: (B, 3, 3)
-            coords_d: Candidate depth values. shape: (depth_bin,)
-        '''
-        B, num_box, _ = glip_bbox.shape
-        d_coors = torch.arange(*self.d_bound, dtype=torch.float).view(1, 1, 1, -1, 1).expand(B, num_box, 2, -1, 1).to(glip_bbox.device)   # Left shape: (B, num_box, 2, D, 1)
-        D = d_coors.shape[-2]
-        glip_bbox = glip_bbox.view(B, num_box, 2, 1, 2).expand(-1, -1, -1, D, -1)   # Left shape: (B, num_box, 2, D, 2)
-        glip_bbox_3d = torch.cat((glip_bbox * d_coors, d_coors), dim = -1).unsqueeze(-1)  # Left shape: (B, num_box, 2, D, 3, 1)
-        Ks = Ks.view(B, 1, 1, 1, 3, 3)  # Left shape: (B, 1, 1, 1, 3, 3)
-        glip_bbox_3d = (Ks.inverse() @ glip_bbox_3d).view(B, num_box, 2 * D * 3)    # Left shape: (B, num_box, 6 * D)
-        glip_bbox_emb = self.glip_box_emb_mlp(glip_bbox_3d) # Left shape: (B, num_box, L)
-
-        return glip_bbox_emb
-
     def create_frustum(self, img_shape_after_aug, feat_shape):
         ogfW, ogfH = img_shape_after_aug
         fW, fH = feat_shape
@@ -505,7 +497,7 @@ class PETR_HEAD(nn.Module):
         points = (Ks.inverse() @ points).squeeze(-1)    # Left shape: (B, D, H, W, 3)
         return points
 
-    def forward(self, feat, glip_results, class_name_emb, Ks, scale_ratios, img_mask, batched_inputs, pad_img_resolution, ori_img_resolution,):
+    def forward(self, feat, glip_results, class_name_emb, Ks, scale_ratios, img_mask, batched_inputs, pad_img_resolution, ori_img_resolution, center_head_out = None):
         B = feat.shape[0]
         img_mask = F.interpolate(img_mask[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
 
@@ -525,10 +517,7 @@ class PETR_HEAD(nn.Module):
         # Notably, the BEV feature shape should be (B, C bev_z, bev_x) rather than (B, C bev_y, bev_x).
         bev_feat = voxel_pooling_train(geom_xyz.contiguous(), img_feat_with_depth.contiguous(), self.voxel_num.cuda())   # Left shape: (B, C, bev_z, bev_x)
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
-        try:
-            bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
-        except:
-            pdb.set_trace()
+        bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
         bev_feat_pos = self.bev_pos2d_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
 
         # For vis
@@ -552,13 +541,14 @@ class PETR_HEAD(nn.Module):
         query_embeds = self.query_embedding(pos2posemb3d(reference_points))   # Left shape: (B, num_query, L) 
         tgt = self.tgt_embed.weight[None].expand(B, -1, -1) # Left shape: (B, num_query, L)
 
-        if self.cfg.MODEL.GLIP_MODEL.GLIP_INITIALIZE_QUERY:
-            glip_bbox_emb = self.box_2d_emb(glip_results['bbox'], Ks) # Left shape: (B, num_box, L)
-            glip_cls_emb = self.glip_cls_emb_mlp(glip_results['cls_emb'])  # Left shape: (B, num_box, L)
-            glip_score_emb = self.glip_conf_emb(glip_results['scores'].unsqueeze(-1))   # Left shape: (B, num_box, L) 
-            glip_box_num = glip_bbox_emb.shape[1]
-            glip_initialized_tgt = tgt[:, :glip_box_num].clone() + glip_bbox_emb + glip_cls_emb + glip_score_emb
-            tgt = torch.cat((glip_initialized_tgt, tgt[:, glip_box_num:]), dim = 1) # Left shape: (B, num_query, L) 
+        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            center_conf_pred = center_head_out['topk_center_conf']  # Left shape: (B, num_proposal, 1)
+            topk_center_xyz = center_head_out['topk_center_xyz']    # Left shape: (B, num_proposal, 3)
+            center_conf_emb = self.center_conf_emb(center_conf_pred)    # Left shape: (B, num_proposal, L)
+            center_xyz_emb = self.center_xyz_emb(pos2posemb3d(topk_center_xyz))  # Left shape: (B, num_proposal, L)
+            center_proposal_num = center_conf_emb.shape[1]
+            center_initialized_tgt = tgt[:, :center_proposal_num].clone() + center_conf_emb + center_xyz_emb
+            tgt = torch.cat((center_initialized_tgt, tgt[:, center_proposal_num:]), dim = 1) # Left shape: (B, num_query, L) 
 
         query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
 
@@ -918,6 +908,8 @@ class PETR_HEAD(nn.Module):
             batched_inputs[batch_id]['instances']._fields['gt_poses'] = batched_inputs[batch_id]['instances']._fields['gt_poses'][instance_in_rang_flag]
             batched_inputs[batch_id]['instances']._fields['gt_keypoints'] = batched_inputs[batch_id]['instances']._fields['gt_keypoints'][instance_in_rang_flag]
             batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'] = batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'][instance_in_rang_flag]
+            batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'][instance_in_rang_flag]
+            batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'][instance_in_rang_flag]
         return batched_inputs
         
 def pos2posemb3d(pos, num_pos_feats=128, temperature=10000):

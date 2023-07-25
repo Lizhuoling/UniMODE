@@ -150,13 +150,43 @@ class DatasetMapper3D(DatasetMapper):
         
             # convert to instance format
             instances = annotations_to_instances(annos, image_shape, unknown_categories)
-            dataset_dict["instances"] = detection_utils.filter_empty_instances(instances)
+            instances = detection_utils.filter_empty_instances(instances)
+            dataset_dict["instances"] = instances
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            augmented_image_h, augmented_image_w = image.shape[0], image.shape[1]
+            downsample_factor = self.cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR
+            feat_h, feat_w = augmented_image_h // downsample_factor, augmented_image_w // downsample_factor
+            # Prepare 2D center gts.
+            heatmap = np.zeros((feat_h, feat_w), dtype = np.float32)
+            gt_box2d = instances._fields['gt_boxes'].tensor.numpy().reshape(-1, 2, 2) # Left shape: (num_box, 2, 2)
+            gt_box2d[gt_box2d < 0] = 0
+            gt_box2d[:, :, 0] = gt_box2d[:, :, 0].clip(max = augmented_image_w - 1)    # clip the width
+            gt_box2d[:, :, 1] = gt_box2d[:, :, 1].clip(max = augmented_image_h - 1)    # clip the height
+            gt_box2d = gt_box2d / downsample_factor
+            gt_box2d_center = np.mean(gt_box2d, axis = 1)  # Left shape: (num_box, 2)
+            gt_box2d_dim = gt_box2d[:, 1] - gt_box2d[:, 0]  # Left shape: (num_box, 2), width first and then height
+            for box_idx in range(gt_box2d.shape[0]):
+                radius = gaussian_radius(gt_box2d_dim[box_idx][1], gt_box2d_dim[box_idx][0])
+                radius = max(0, int(radius))
+                heatmap = draw_umich_gaussian(heatmap, gt_box2d_center[box_idx], radius)    # Left shape: (feat_h, feat_w)
+                dataset_dict['obj_heatmap'] = torch.Tensor(heatmap)
+
+            # Prepare projected 3D center gts. 9 numbers in gt_boxes3D: projected 2D center, depth, w, h, l, 3D center
+            gt_box2d_center = torch.Tensor(gt_box2d_center) # Left shape: (num_box, 2)
+            gt_proj_3dcenters = instances._fields['gt_boxes3D'][:, :2].clone() / downsample_factor # Left shape: (num_box, 2)
+            gt_featreso_2dto3d_offset = gt_proj_3dcenters - gt_box2d_center # Left shape: (num_box, 2)
+            dataset_dict["instances"].set('gt_featreso_box2d_center', gt_box2d_center)
+            dataset_dict["instances"].set('gt_featreso_2dto3d_offset', gt_featreso_2dto3d_offset)
 
         dataset_dict["horizontal_flip_flag"] = False
         for transform in transforms:
             if isinstance(transform, T.HFlipTransform):
                 dataset_dict["horizontal_flip_flag"] = True
-
+                # The box has already been flipped.
+                #heatmap = np.ascontiguousarray(heatmap[:, ::-1])
+                #dataset_dict["instances"]._fields['gt_featreso_2dto3d_offset'][:, 0] = -dataset_dict["instances"]._fields['gt_featreso_2dto3d_offset'][:, 0]
+        
         return dataset_dict
 
 class Resize_DownRatio():
@@ -296,3 +326,58 @@ def annotations_to_instances(annos, image_size, unknown_categories):
     target.gt_unknown_category_mask = gt_unknown_category_mask.unsqueeze(0).repeat([n, 1])
 
     return target
+
+def gaussian_radius(height, width, min_overlap=0.7):
+	a1 = 1
+	b1 = (height + width)
+	c1 = width * height * (1 - min_overlap) / (1 + min_overlap)
+	sq1 = np.sqrt(b1 ** 2 - 4 * a1 * c1)
+	r1 = (b1 + sq1) / 2
+
+	a2 = 4
+	b2 = 2 * (height + width)
+	c2 = (1 - min_overlap) * width * height
+	sq2 = np.sqrt(b2 ** 2 - 4 * a2 * c2)
+	r2 = (b2 + sq2) / 2
+
+	a3 = 4 * min_overlap
+	b3 = -2 * min_overlap * (height + width)
+	c3 = (min_overlap - 1) * width * height
+	sq3 = np.sqrt(b3 ** 2 - 4 * a3 * c3)
+	r3 = (b3 + sq3) / 2
+
+	return min(r1, r2, r3)
+
+def gaussian2D(shape, sigma=1):
+	m, n = [(ss - 1.) / 2. for ss in shape]
+	y, x = np.ogrid[-m:m + 1, -n:n + 1]
+
+	# generate meshgrid 
+	h = np.exp(-(x * x + y * y) / (2 * sigma * sigma))
+	h[h < np.finfo(h.dtype).eps * h.max()] = 0
+
+	return h
+
+def draw_umich_gaussian(heatmap, center, radius, k=1, ignore=False):
+	diameter = 2 * radius + 1
+	gaussian = gaussian2D((diameter, diameter), sigma=diameter / 6)
+
+	x, y = int(center[0]), int(center[1])
+	height, width = heatmap.shape[0:2]
+
+	left, right = min(x, radius), min(width - x, radius + 1)
+	top, bottom = min(y, radius), min(height - y, radius + 1)
+
+	masked_heatmap = heatmap[y - top:y + bottom, x - left:x + right]
+	masked_gaussian = gaussian[radius - top:radius + bottom, radius - left:radius + right]
+	'''
+	Assign all pixels within the area as -1. They will be further suppressed by heatmap from other 
+	objects with the maximum. Therefore, these don't care objects won't influence other positive samples.
+	'''
+	if min(masked_gaussian.shape) > 0 and min(masked_heatmap.shape) > 0:
+		if ignore:
+			masked_heatmap[masked_heatmap == 0] = -1
+		else:
+			np.maximum(masked_heatmap, masked_gaussian * k, out=masked_heatmap)
+
+	return heatmap

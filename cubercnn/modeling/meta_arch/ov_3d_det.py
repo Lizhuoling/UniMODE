@@ -259,7 +259,7 @@ class OV_3D_Det(BaseModule):
         for batch_input in batched_inputs:
             cls_gts = batch_input['instances'].get('gt_classes')
             valid_gt_mask = (cls_gts != -1)
-            for gt_key in ['gt_classes', 'gt_boxes', 'gt_boxes3D', 'gt_poses', 'gt_keypoints', 'gt_unknown_category_mask']:
+            for gt_key in ['gt_classes', 'gt_boxes', 'gt_boxes3D', 'gt_poses', 'gt_keypoints', 'gt_unknown_category_mask', 'gt_featreso_box2d_center', 'gt_featreso_2dto3d_offset']:
                 if gt_key in ('gt_boxes', 'gt_keypoints'):
                     batch_input['instances']._fields[gt_key].tensor = batch_input['instances']._fields[gt_key].tensor[valid_gt_mask]
                 else:
