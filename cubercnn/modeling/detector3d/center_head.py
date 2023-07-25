@@ -1,4 +1,5 @@
 import pdb
+import cv2
 import numpy as np
 
 import torch
@@ -53,42 +54,68 @@ class CENTER_HEAD(nn.Module):
         INIT_P = 0.01
         self.obj_head[-1].bias.data.fill_(- np.log(1 / INIT_P - 1))
     
-    def forward(self, feat, Ks):
+    def forward(self, feat, Ks, batched_inputs):
         obj_pred = sigmoid_hm(self.obj_head(feat))  # Left shape: (B, 1, feat_h, feat_w)
         depth_pred = self.depth_head(feat)  # Left shape: (B, 1, feat_h, feat_w)
+        depth_pred = 1 / depth_pred.sigmoid() - 1   # inv_sigmoid decoding
         offset_pred = self.offset_head(feat)    # Left shape: (B, 2, feat_h, feat_w)
 
         bs, _, feat_h, feat_w = obj_pred.shape
+
+        # Predicted 3D points, which are used for initializing queries during training and also determining BEV perception range during inference.
         center_conf, center_idx = obj_pred.view(bs, feat_h * feat_w).topk(self.proposal_number, dim = -1)
         center_u, center_v = center_idx % feat_w, center_idx // feat_h
         center_uv = torch.stack((center_u, center_v), dim = -1).float()  # Left shape: (B, num_proposal, 2)
-        
         norm_center_u = (center_u - feat_w / 2) / (feat_w / 2)  # Left shape: (B, num_proposal)
         norm_center_v = (center_v - center_v / 2) / (feat_h / 2)
         norm_center_uv = torch.stack((norm_center_u, norm_center_v), dim = -1)  # Left shape: (B, num_proposal, 2)
-        
         topk_depth_pred = F.grid_sample(depth_pred, norm_center_uv.unsqueeze(2)).squeeze(-1).permute(0, 2, 1).contiguous()   # Left shape: (B, num_proposal, 1)
         topk_offset_pred = F.grid_sample(offset_pred, norm_center_uv.unsqueeze(2)).squeeze(-1).permute(0, 2, 1).contiguous()   # Left shape: (B, num_proposal, 2)
         center_uv = (center_uv + topk_offset_pred) * self.downsample_factor # Left shape: (B, num_proposal, 2)
         center_uvd = torch.cat((center_uv * topk_depth_pred, topk_depth_pred), dim = -1)    # Left shape: (B, num_proposal, 3)
-        
         center_conf = center_conf.unsqueeze(-1) # Left shape: (B, num_proposal, 1)
         center_xyz = (Ks.unsqueeze(1).inverse() @ center_uvd.unsqueeze(-1)).squeeze(-1) # Left shape: (B, num_proposal, 3)
 
+        valid_proposal_center_xyz = []
+        if self.training:
+            # During training, we get proposal points by selecting gt centers.
+            tgt_depth_preds = []
+            tgt_offset_preds = []
+            for bs_idx, batch_input in enumerate(batched_inputs):
+                gt_box2d_center = batch_input['instances'].get('gt_featreso_box2d_center').cuda() # Left shape: (num_box, 2)
+                norm_gt_box2d_center = gt_box2d_center.clone()
+                norm_gt_box2d_center[:, 0] = (norm_gt_box2d_center[:, 0] - feat_w / 2) / (feat_w / 2)
+                norm_gt_box2d_center[:, 1] = (norm_gt_box2d_center[:, 1] - feat_h / 2) / (feat_h / 2)
+                tgt_depth_pred = F.grid_sample(depth_pred[bs_idx][None], norm_gt_box2d_center[None, None])[0, :, 0, :].permute(1, 0).contiguous()    # Left shape: (num_gt, 1)
+                tgt_depth_preds.append(tgt_depth_pred)
+                tgt_offset_pred = F.grid_sample(offset_pred[bs_idx][None], norm_gt_box2d_center[None, None])[0, :, 0, :].permute(1, 0).contiguous()  # Left shape: (num_gt, 2)
+                tgt_offset_preds.append(tgt_offset_pred)
+                tgt_3dcenter_uv_pred = (gt_box2d_center + tgt_offset_pred) * self.downsample_factor   # Left shape: (num_gt, 2)
+                tgt_3dcenter_uvd_pred = torch.cat((tgt_3dcenter_uv_pred * tgt_depth_pred, tgt_depth_pred), dim = -1)    # Left shape: (num_gt, 3)
+                tgt_3dcenter_xyz_pred = (Ks[bs_idx][None].inverse() @ tgt_3dcenter_uvd_pred.unsqueeze(-1)).squeeze(-1)  # Left shape: (num_gt, 3)
+                valid_proposal_center_xyz.append(tgt_3dcenter_xyz_pred.detach())
+        else:
+            # During inference, we ontain proposal points by confidence filtering
+            valid_proposal_mask = (center_conf > self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.PROPOSAL_CONF_THRE).squeeze(-1) # Left shape: (B, valid_proposal_num)
+            for bs_idx, bs_mask in enumerate(valid_proposal_mask):
+                bs_valid_center_xyz = center_xyz[bs_idx][bs_mask] # Left shape: (num_valid_proposal, 3)
+                valid_proposal_center_xyz.append(bs_valid_center_xyz.detach())
+
         return dict(
-            obj_pred = obj_pred,
-            depth_pred = depth_pred,
-            offset_pred = offset_pred,
-            topk_center_conf = center_conf,
-            topk_center_xyz = center_xyz,
+            obj_pred = obj_pred,    # Used for computing loss.
+            topk_center_conf = center_conf.detach(),    # Used for initializing queries.
+            topk_center_xyz = center_xyz.detach(),  # Used for initializing queries.
+            valid_proposal_center_xyz = valid_proposal_center_xyz,  # Used for determining BEV range.
+            tgt_depth_preds = tgt_depth_preds,  # Used for computing loss.
+            tgt_offset_preds = tgt_offset_preds,    # Used for computing loss.
         )
 
     def loss(self, center_head_out, Ks, batched_inputs):
         obj_preds = center_head_out['obj_pred']  # Left shape: (B, 1, feat_h, feat_w)
-        depth_preds = center_head_out['depth_pred']   # Left shape: (B, 1, feat_h, feat_w)
-        offset_preds = center_head_out['offset_pred']   # Left shape: (B, 2, feat_h, feat_w)
+        tgt_depth_preds = center_head_out['tgt_depth_preds']   # A list and the length is bs
+        tgt_offset_preds = center_head_out['tgt_offset_preds']   # A list and the length is bs
 
-        loss_info_all_batch = multi_apply(self.loss_single, obj_preds, depth_preds, offset_preds, batched_inputs)[0]
+        loss_info_all_batch = multi_apply(self.loss_single, obj_preds, tgt_depth_preds, tgt_offset_preds, batched_inputs)[0]
         
         loss_dict = {}
         total_num_gt = sum([ele['num_gt'] for ele in loss_info_all_batch])
@@ -100,12 +127,12 @@ class CENTER_HEAD(nn.Module):
                 loss_dict[key] = sum([ele[key] for ele in loss_info_all_batch]) / total_num_gt
         return loss_dict
 
-    def loss_single(self, obj_pred, depth_pred, offset_pred, batch_input):
+    def loss_single(self, obj_pred, tgt_depth_pred, tgt_offset_pred, batch_input):
         '''
         Input:
             obj_pred shape: (1, feat_h, feat_w)
-            depth_pred shape: (1, feat_h, feat_w)
-            offset_pred shape: (2, feat_h, feat_w)
+            tgt_depth_pred shape: (num_gt, 1)
+            offset_pred shape: (num_gt, 2)
         '''
         device = obj_pred.device
         _, feat_h, feat_w = obj_pred.shape
@@ -121,16 +148,13 @@ class CENTER_HEAD(nn.Module):
         gt_2dto3d_offset = instances.get('gt_featreso_2dto3d_offset').to(device)    # Left shape: (num_box, 2)
         gt_depth = instances.get('gt_boxes3D')[:, 2:3].to(device)  # Left shape: (num_box, 1)
         num_gt = gt_depth.shape[0]
-        
-        gt_box2d_center[:, 0] = (gt_box2d_center[:, 0] - feat_w / 2) / (feat_w / 2)
-        gt_box2d_center[:, 1] = (gt_box2d_center[:, 1] - feat_h / 2) / (feat_h / 2)
-        depth_pred = F.grid_sample(depth_pred[None], gt_box2d_center[None, None])[0, :, 0, :].permute(1, 0).contiguous() # Left shape: (num_box, 1)
-        depth_pred = 1 / torch.sigmoid(depth_pred) - 1   # inv_sigmoid decoding
-        offset_pred = F.grid_sample(offset_pred[None], gt_box2d_center[None, None])[0, :, 0, :].permute(1, 0).contiguous()  # Left shape: (num_box, 2)
+
+        depth_pred = tgt_depth_pred # Left shape: (num_box, 1)
+        offset_pred = tgt_offset_pred  # Left shape: (num_box, 2)
         
         depth_loss = self.depth_loss_weight * F.l1_loss(depth_pred, gt_depth, reduction = 'sum')
         offset_loss = self.offset_loss_weight * F.l1_loss(offset_pred, gt_2dto3d_offset, reduction = 'sum')
-
+        
         return (dict(
             center_obj_loss = obj_loss,
             center_depth_loss = depth_loss,

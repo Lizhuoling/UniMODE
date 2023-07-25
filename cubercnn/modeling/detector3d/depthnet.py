@@ -200,23 +200,28 @@ class DepthNet(nn.Module):
             self.context_mlp = Mlp(4, mid_channels, mid_channels)
             self.context_se = SELayer(mid_channels)  
 
-        if cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
-            self.global_average_pool = nn.Sequential(
-                nn.Conv2d(mid_channels, mid_channels, kernel_size=1, stride=1, padding=1),
-                nn.AdaptiveAvgPool2d(1),
-            )
-            self.adapt_fc = nn.Linear(mid_channels, 6)
+        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.ADAPTIVE_BEV_SIZE:
+            self.size_bn = nn.BatchNorm1d(6)
+            self.size_depth_mlp = Mlp(6, mid_channels, mid_channels)
+            self.size_depth_se = SELayer(mid_channels)  
+            self.size_context_mlp = Mlp(6, mid_channels, mid_channels)
+            self.size_context_se = SELayer(mid_channels)
 
         self.init_weights()
 
     def init_weights(self):
-        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
-            nn.init.constant_(self.adapt_fc.weight, 0)
-            nn.init.constant_(self.adapt_fc.bias[:3], 1)    # x y z scaling factor
-            nn.init.constant_(self.adapt_fc.bias[3:], 0)    # x y z offset factor
+        pass
 
-    def forward(self, x, Ks):
+    def forward(self, x, Ks, bev_adaptive_params):
+        '''
+        Input:
+            x shape: (B, in_c, H, W)
+            Ks shape: (B, 3, 3)
+            bev_adaptive_params shape: (B, 6)
+        '''
         x = self.reduce_conv(x)
+        context = x.clone()
+        depth = x.clone()
 
         if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_CAM_INTRINSIC:
             mlp_input = torch.stack(
@@ -229,20 +234,18 @@ class DepthNet(nn.Module):
             )   # mlp_input shape: (B, 4)
             mlp_input = self.bn(mlp_input)
             context_se = self.context_mlp(mlp_input)[..., None, None]
-            context = self.context_se(x, context_se)
+            context = self.context_se(context, context_se)
             depth_se = self.depth_mlp(mlp_input)[..., None, None]
-            depth = self.depth_se(x, depth_se)
-        else:
-            context = x
-            depth = x
+            depth = self.depth_se(depth, depth_se)
 
+        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.ADAPTIVE_BEV_SIZE:
+            size_mlp_input = self.size_bn(bev_adaptive_params)
+            size_context_se = self.size_context_mlp(size_mlp_input)[..., None, None]
+            context = self.size_context_se(context, size_context_se)
+            size_depth_se = self.size_depth_mlp(size_mlp_input)[..., None, None]
+            depth = self.size_depth_se(depth, size_depth_se)
+            
         context = self.context_conv(context)
         depth = self.depth_conv(depth)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ADAPTIVE_BEV_SIZE:
-            global_pool_x = self.global_average_pool(x).squeeze(-1).squeeze(-1)
-            bev_adaptive_reg = self.adapt_fc(global_pool_x) # Left shape: (B, 6)
-        else:
-            bev_adaptive_reg = None
-
-        return torch.cat([depth, context], dim=1), bev_adaptive_reg
+        return torch.cat([depth, context], dim=1)
