@@ -529,7 +529,7 @@ class PETR_HEAD(nn.Module):
                     bev_adaptive_params.append(torch.Tensor([1.0, 1.0, 1.0, 0.0, 0.0, 0.0]).to(proposal_xyz.device))
             bev_adaptive_params = torch.stack(bev_adaptive_params, dim = 0) # Left shape: (B. 6)
         else:
-            bev_adaptive_params = torch.cat((proposal_xyz.new_ones(B, 3), proposal_xyz.new_zeros(B, 3)), dim = 1)   # Left shape: (B. 6)
+            bev_adaptive_params = torch.cat((feat.new_ones(B, 3), feat.new_zeros(B, 3)), dim = 1)   # Left shape: (B. 6)
 
         depth_and_feat = self.depthnet(feat, Ks, bev_adaptive_params)
         depth = depth_and_feat[:, :self.depth_channels].softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)

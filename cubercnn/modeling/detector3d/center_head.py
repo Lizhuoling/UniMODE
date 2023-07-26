@@ -95,11 +95,13 @@ class CENTER_HEAD(nn.Module):
                 tgt_3dcenter_xyz_pred = (Ks[bs_idx][None].inverse() @ tgt_3dcenter_uvd_pred.unsqueeze(-1)).squeeze(-1)  # Left shape: (num_gt, 3)
                 valid_proposal_center_xyz.append(tgt_3dcenter_xyz_pred.detach())
         else:
-            # During inference, we ontain proposal points by confidence filtering
+            # During inference, we obtain proposal points by confidence filtering
             valid_proposal_mask = (center_conf > self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.PROPOSAL_CONF_THRE).squeeze(-1) # Left shape: (B, valid_proposal_num)
             for bs_idx, bs_mask in enumerate(valid_proposal_mask):
                 bs_valid_center_xyz = center_xyz[bs_idx][bs_mask] # Left shape: (num_valid_proposal, 3)
                 valid_proposal_center_xyz.append(bs_valid_center_xyz.detach())
+                tgt_depth_preds = None
+                tgt_offset_preds = None
 
         return dict(
             obj_pred = obj_pred,    # Used for computing loss.

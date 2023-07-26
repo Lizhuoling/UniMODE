@@ -493,7 +493,6 @@ def build_dla_from_vision_fpn_backbone(cfg, input_shape: ShapeSpec, priors=None)
     """
 
     imagenet_pretrain = cfg.MODEL.WEIGHTS_PRETRAIN + cfg.MODEL.WEIGHTS == ''
-    imagenet_pretrain = False # For debug
 
     bottom_up = DLABackbone(cfg, input_shape, pretrained=imagenet_pretrain)
     in_features = cfg.MODEL.FPN.IN_FEATURES
