@@ -51,6 +51,7 @@ MODEL:
       NUM_QUERY: 200
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
       DOWNSAMPLE_FACTOR: 16
+      LID: True
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True

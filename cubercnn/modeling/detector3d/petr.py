@@ -314,15 +314,29 @@ class PETR_HEAD(nn.Module):
         self.d_bound = cfg.MODEL.DETECTOR3D.PETR.HEAD.D_BOUND
 
         self.embed_dims = 256
-        self.lang_dims = cfg.MODEL.GLIP_MODEL.MODEL.LANGUAGE_BACKBONE.LANG_DIM
-        self.depth_num = 64
-        self.position_dim = 3 * self.depth_num
         self.uncern_range = cfg.MODEL.DETECTOR3D.PETR.HEAD.UNCERN_RANGE
 
         self.register_buffer('voxel_size', torch.Tensor([row[2] for row in [self.x_bound, self.y_bound, self.z_bound]]))
         self.register_buffer('voxel_coord', torch.Tensor([row[0] + row[2] / 2.0 for row in [self.x_bound, self.y_bound, self.z_bound]]))
         self.register_buffer('voxel_num', torch.LongTensor([(row[1] - row[0]) / row[2]for row in [self.x_bound, self.y_bound, self.z_bound]]))
-        self.depth_channels = torch.arange(*self.d_bound, dtype=torch.float).shape[0]
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.LID:
+            depth_start, depth_end, depth_interval = self.d_bound
+            depth_num = math.ceil((depth_end - depth_start) / depth_interval)
+            index  = torch.arange(start=0, end=depth_num, step=1).float()
+            index_1 = index + 1
+            bin_size = (depth_end - depth_start) / (depth_num * (1 + depth_num))
+            self.d_coords = depth_start + bin_size * index * index_1    # Left shape: (D,)
+
+            coor_z_start, coor_z_end, coor_z_interval =  self.position_range[4], self.position_range[5], cfg.MODEL.DETECTOR3D.PETR.HEAD.GRID_SIZE[2]
+            coor_z_num = math.ceil((coor_z_end - coor_z_start) / coor_z_interval)
+            self.coor_z_num = coor_z_num
+            coor_z_index  = torch.arange(start=0, end=coor_z_num, step=1).float()
+            coor_z_index_1 = coor_z_index + 1
+            coor_z_bin_size = (coor_z_end - coor_z_start) / (coor_z_num * (1 + coor_z_num))
+            self.coor_z_coords = coor_z_start + coor_z_bin_size * coor_z_index * coor_z_index_1    # Left shape: (bev_z,)
+        
+        self.depth_channels = math.ceil((self.d_bound[1] - self.d_bound[0]) / self.d_bound[2])
         
         self.pos2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
         self.bev_pos2d_encoder = nn.Sequential(
@@ -439,26 +453,6 @@ class PETR_HEAD(nn.Module):
         
         self.init_weights()
 
-        if cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'vision':
-            self.glip_vision_adapter = nn.Linear(self.embed_dims, self.embed_dims)
-            self.glip_vision_position_encoder = nn.Sequential(
-                nn.Conv2d(self.position_dim, self.embed_dims*4, kernel_size=1, stride=1, padding=0),
-                nn.ReLU(),
-                nn.Conv2d(self.embed_dims*4, self.embed_dims, kernel_size=1, stride=1, padding=0),
-            )
-        elif cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'language':
-            self.glip_text_adapter = nn.Linear(self.lang_dims, self.embed_dims)
-        elif cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION == 'VL':
-            self.glip_vision_adapter = nn.Linear(self.embed_dims, self.embed_dims)
-            self.glip_vision_position_encoder = nn.Sequential(
-                nn.Conv2d(self.position_dim, self.embed_dims*4, kernel_size=1, stride=1, padding=0),
-                nn.ReLU(),
-                nn.Conv2d(self.embed_dims*4, self.embed_dims, kernel_size=1, stride=1, padding=0),
-            )
-            self.glip_text_adapter = nn.Linear(self.lang_dims, self.embed_dims)
-        elif cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION != 'none':
-            raise Exception("Unsupported GLIP feature fusion mode: {}".format(cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION))
-
     def init_weights(self):
         if self.cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'PETR_TRANSFORMER':
             self.transformer.init_weights()
@@ -469,7 +463,10 @@ class PETR_HEAD(nn.Module):
     def create_frustum(self, img_shape_after_aug, feat_shape):
         ogfW, ogfH = img_shape_after_aug
         fW, fH = feat_shape
-        d_coords = torch.arange(*self.d_bound, dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # Left shape: (D, H, W)
+        if self.cfg.MODEL.DETECTOR3D.PETR.LID:
+            d_coords = self.d_coords.view(-1, 1, 1).expand(-1, fH, fW) # Left shape: (D, H, W)
+        else:
+            d_coords = torch.arange(*self.d_bound, dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # Left shape: (D, H, W)
         D, _, _ = d_coords.shape
         x_coords = torch.linspace(0, ogfW - 1, fW, dtype=torch.float).view(1, 1, fW).expand(D, fH, fW)
         y_coords = torch.linspace(0, ogfH - 1, fH, dtype=torch.float).view(1, fH, 1).expand(D, fH, fW)
@@ -478,18 +475,8 @@ class PETR_HEAD(nn.Module):
         return frustum
 
     @torch.no_grad()
-    def get_geometry(self, Ks, bev_adaptive_params, B, img_shape_after_aug, feat_shape):
+    def get_geometry(self, Ks, B, img_shape_after_aug, feat_shape):
         points = self.create_frustum(img_shape_after_aug, feat_shape)[None].expand(B, -1, -1, -1, -1).cuda()   # Left shape: (B, D, H, W, 3)
-
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.ADAPTIVE_BEV_SIZE:
-            ori_position_range = torch.Tensor(self.position_range).cuda()[None].expand(B, -1)    # Left shape: (B, 6)
-            new_position_range = ori_position_range.clone()
-            new_position_range[:, 0:2] = new_position_range[:, 0:2].clone() * bev_adaptive_params[:, 0:1] + bev_adaptive_params[:, 3:4]
-            new_position_range[:, 2:4] = new_position_range[:, 2:4].clone() * bev_adaptive_params[:, 1:2] + bev_adaptive_params[:, 4:5]
-            new_position_range[:, 4:6] = new_position_range[:, 4:6].clone() * bev_adaptive_params[:, 2:3] + bev_adaptive_params[:, 5:6]
-            ori_bev_depth_demand = ((ori_position_range[:, 1] - ori_position_range[:, 0]).square() + (ori_position_range[:, 5] - ori_position_range[:, 4]).square()).sqrt() # Left shape: (bs,)
-            new_bev_depth_demand = ((new_position_range[:, 1] - new_position_range[:, 0]).square() + (new_position_range[:, 5] - new_position_range[:, 4]).square()).sqrt() # Left shape: (bs,)
-            points[..., 2] = points[..., 2] * (new_bev_depth_demand / ori_bev_depth_demand)[:, None, None, None] # Left shape: (B, D, H, W, 3)
         
         points = torch.cat((points[..., :2] * points[..., 2:], points[..., 2:]), dim = -1)  # Left shape: (B, D, H, W, 3)
         points = points.unsqueeze(-1)  # Left shape: (1, D, H, W, 3, 1)
@@ -501,49 +488,20 @@ class PETR_HEAD(nn.Module):
         B = feat.shape[0]
         img_mask = F.interpolate(img_mask[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.ADAPTIVE_BEV_SIZE:
-            bev_adaptive_params = []
-            valid_proposal_center_xyz = center_head_out['valid_proposal_center_xyz']
-
-            for bs_idx, proposal_xyz in enumerate(valid_proposal_center_xyz):
-                proposal_num = proposal_xyz.shape[0]    # proposal_xyz shape: (num_proposal, 3)
-                if proposal_num >= self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.ADAPT_VALID_PROPOSAL_MIN_NUM:
-                    x_min, x_max = proposal_xyz[:, 0].min().item(), proposal_xyz[:, 0].max().item()
-                    y_min, y_max = proposal_xyz[:, 1].min().item(), proposal_xyz[:, 1].max().item()
-                    z_min, z_max = proposal_xyz[:, 2].min().item(), proposal_xyz[:, 2].max().item()
-                    extend_param = self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.BEV_RANGE_EXTEND_PARAM
-                    new_x_min = max(x_min - extend_param * (x_max - x_min), self.position_range[0])
-                    new_x_max = min(x_max + extend_param * (x_max - x_min), self.position_range[1])
-                    new_y_min = max(y_min - extend_param * (y_max - y_min), self.position_range[2])
-                    new_y_max = min(y_max + extend_param * (y_max - y_min), self.position_range[3])
-                    new_z_min = max(z_min - extend_param * (z_max - z_min), self.position_range[4])
-                    new_z_max = min(z_max + extend_param * (z_max - z_min), self.position_range[5])
-                    x_k = (new_x_max - new_x_min) / (self.position_range[1] - self.position_range[0])
-                    x_b = new_x_min - x_k * self.position_range[0]
-                    y_k = (new_y_max - new_y_min) / (self.position_range[3] - self.position_range[2])
-                    y_b = new_y_min - y_k * self.position_range[2]
-                    z_k = (new_z_max - new_z_min) / (self.position_range[5] - self.position_range[4])
-                    z_b = new_z_min - z_k * self.position_range[4]
-                    bev_adaptive_params.append(torch.Tensor([x_k, x_b, y_k, y_b, z_k, z_b]).to(feat.device))
-                else:   # No enough proposals with high confidence to calculate the range of BEV perception.
-                    bev_adaptive_params.append(torch.Tensor([1.0, 1.0, 1.0, 0.0, 0.0, 0.0]).to(proposal_xyz.device))
-            bev_adaptive_params = torch.stack(bev_adaptive_params, dim = 0) # Left shape: (B. 6)
-        else:
-            bev_adaptive_params = torch.cat((feat.new_ones(B, 3), feat.new_zeros(B, 3)), dim = 1)   # Left shape: (B. 6)
-
-        depth_and_feat = self.depthnet(feat, Ks, bev_adaptive_params)
+        depth_and_feat = self.depthnet(feat, Ks)
         depth = depth_and_feat[:, :self.depth_channels].softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)
         img_feat_with_depth = depth.unsqueeze(1) * depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)].unsqueeze(2)  # Left shape: (B, C, D, H, W)
         img_feat_with_depth = img_feat_with_depth.permute(0, 2, 3, 4, 1)    # Left shape: (B, D, H, W, C)
-        geom_xyz = self.get_geometry(Ks, bev_adaptive_params, B, ori_img_resolution[0].int().cpu().numpy(), (img_mask.shape[2], img_mask.shape[1]))    # Left shape: (B, D, H, W, 3)
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.ADAPTIVE_BEV_SIZE:
-            voxel_coord = (self.voxel_coord[None].expand(B, -1) * bev_adaptive_params[:, :3] + bev_adaptive_params[:, 3:])[:, None, None, None]
-            voxel_size = (self.voxel_size[None].expand(B, -1) * bev_adaptive_params[:, :3] + bev_adaptive_params[:, 3:])[:, None, None, None]
-            geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
+        geom_xyz = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy(), (img_mask.shape[2], img_mask.shape[1]))    # Left shape: (B, D, H, W, 3)
+ 
+        if self.cfg.MODEL.DETECTOR3D.PETR.LID:
+            geom_xyz = geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)
+            geom_xy = (geom_xyz[..., :2] / self.voxel_size[:2]).int()    # Left shape: (B, D, H, W, 2)
+            geom_z = (geom_xyz[..., 2:].unsqueeze(-1) >= self.coor_z_coords.cuda().view(1, 1, 1, 1, 1, -1)).int().sum(-1) - 1   # Left shape: (B, D, H, W, 1)
+            geom_xyz = torch.cat((geom_xy, geom_z), dim = -1).int()   # Left shape: (B, D, H, W, 3)
         else:
             geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
         geom_xyz[img_mask[:, None, :, :, None].expand_as(geom_xyz)] = -1   # Block feature from invalid image region.
-
         # Notably, the BEV feature shape should be (B, C bev_z, bev_x) rather than (B, C bev_y, bev_x).
         bev_feat = voxel_pooling_train(geom_xyz.contiguous(), img_feat_with_depth.contiguous(), self.voxel_num.cuda())   # Left shape: (B, C, bev_z, bev_x)
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
@@ -608,23 +566,16 @@ class PETR_HEAD(nn.Module):
         outputs_regs = torch.stack(outputs_regs, dim = 0)
         
         outputs_regs[..., self.reg_key_manager('loc')] = outputs_regs[..., self.reg_key_manager('loc')].sigmoid()
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.ADAPTIVE_BEV_SIZE:
-            ori_position_range = torch.Tensor(self.position_range).cuda()[None].expand(B, -1)    # Left shape: (B, 6)
-            new_position_range = ori_position_range.clone()
-            new_position_range_x = new_position_range[:, 0:2].clone() * bev_adaptive_params[:, 0:1] + bev_adaptive_params[:, 3:4]
-            new_position_range_y = new_position_range[:, 2:4].clone() * bev_adaptive_params[:, 1:2] + bev_adaptive_params[:, 4:5]
-            new_position_range_z = new_position_range[:, 4:6].clone() * bev_adaptive_params[:, 2:3] + bev_adaptive_params[:, 5:6]   
-            new_position_range = torch.cat((new_position_range_x, new_position_range_y, new_position_range_z), dim = -1)    # Left shape: (B, 6)
-            new_position_range = new_position_range[None, :, None]   # Left shape: (1, B, 1, 6)
-            outputs_regs_x = outputs_regs[..., self.reg_key_manager('loc')][..., 0].clone() * (new_position_range[..., 1].clone() - new_position_range[..., 0].clone()) + new_position_range[..., 0].clone()
-            outputs_regs_y = outputs_regs[..., self.reg_key_manager('loc')][..., 1].clone() * (new_position_range[..., 3].clone() - new_position_range[..., 2].clone()) + new_position_range[..., 2].clone()
-            outputs_regs_z = outputs_regs[..., self.reg_key_manager('loc')][..., 2].clone() * (new_position_range[..., 5].clone() - new_position_range[..., 4].clone()) + new_position_range[..., 4].clone()
-            outputs_regs[..., self.reg_key_manager('loc')] = torch.stack((outputs_regs_x, outputs_regs_y, outputs_regs_z), dim  = -1)
+
+        outputs_regs[..., self.reg_key_manager('loc')][..., 0] = outputs_regs[..., self.reg_key_manager('loc')][..., 0] * \
+            (self.position_range[1] - self.position_range[0]) + self.position_range[0]
+        outputs_regs[..., self.reg_key_manager('loc')][..., 1] = outputs_regs[..., self.reg_key_manager('loc')][..., 1] * \
+            (self.position_range[3] - self.position_range[2]) + self.position_range[2]
+        if self.cfg.MODEL.DETECTOR3D.PETR.LID:
+            pred_z = outputs_regs[..., self.reg_key_manager('loc')][..., 2].clone()
+            pred_z = (pred_z * pred_z + pred_z) / 2 # Left shape: (num_dec, B, num_query)
+            outputs_regs[..., self.reg_key_manager('loc')][..., 2] = pred_z * (self.position_range[5] - self.position_range[4]) + self.position_range[4]
         else:
-            outputs_regs[..., self.reg_key_manager('loc')][..., 0] = outputs_regs[..., self.reg_key_manager('loc')][..., 0] * \
-                (self.position_range[1] - self.position_range[0]) + self.position_range[0]
-            outputs_regs[..., self.reg_key_manager('loc')][..., 1] = outputs_regs[..., self.reg_key_manager('loc')][..., 1] * \
-                (self.position_range[3] - self.position_range[2]) + self.position_range[2]
             outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
                 (self.position_range[5] - self.position_range[4]) + self.position_range[4]
         

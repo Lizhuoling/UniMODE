@@ -390,12 +390,16 @@ def main(args):
         if category_path.startswith(util.CubeRCNNHandler.PREFIX):
             category_path = util.CubeRCNNHandler._get_local_path(util.CubeRCNNHandler, category_path)
         
-        metadata = util.load_json(category_path)
+        '''metadata = util.load_json(category_path)
         # register the categories
         thing_classes = metadata['thing_classes']
         id_map = {int(key):val for key, val in metadata['thing_dataset_id_to_contiguous_id'].items()}
         MetadataCatalog.get('omni3d_model').thing_classes = thing_classes
-        MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id  = id_map
+        MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id  = id_map'''
+        data.register_and_store_model_metadata(None, cfg.OUTPUT_DIR, filter_settings)
+
+        thing_classes = MetadataCatalog.get('omni3d_model').thing_classes
+        dataset_id_to_contiguous_id = MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id
         
     else: 
         # setup and join the data.
@@ -412,7 +416,7 @@ def main(args):
         It may be useful to keep track of which categories are annotated/known
         for each dataset in use, in case a method wants to use this information.
         '''
-
+        
         infos = datasets.dataset['info']
 
         if type(infos) == dict:
@@ -443,7 +447,8 @@ def main(args):
             logger.info([thing_classes[i] for i in (possible_categories & known_category_training_ids)])
 
         # compute priors given the training data.
-        priors = util.compute_priors(cfg, datasets)
+        #priors = util.compute_priors(cfg, datasets)    # Needed for Cube RCNN.
+        priors = None
     
     '''
     The training loops can attempt to train for N times.

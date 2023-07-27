@@ -200,24 +200,16 @@ class DepthNet(nn.Module):
             self.context_mlp = Mlp(4, mid_channels, mid_channels)
             self.context_se = SELayer(mid_channels)  
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.ADAPTIVE_BEV_SIZE:
-            self.size_bn = nn.BatchNorm1d(6)
-            self.size_depth_mlp = Mlp(6, mid_channels, mid_channels)
-            self.size_depth_se = SELayer(mid_channels)  
-            self.size_context_mlp = Mlp(6, mid_channels, mid_channels)
-            self.size_context_se = SELayer(mid_channels)
-
         self.init_weights()
 
     def init_weights(self):
         pass
 
-    def forward(self, x, Ks, bev_adaptive_params):
+    def forward(self, x, Ks):
         '''
         Input:
             x shape: (B, in_c, H, W)
             Ks shape: (B, 3, 3)
-            bev_adaptive_params shape: (B, 6)
         '''
         x = self.reduce_conv(x)
         context = x.clone()
@@ -237,13 +229,6 @@ class DepthNet(nn.Module):
             context = self.context_se(context, context_se)
             depth_se = self.depth_mlp(mlp_input)[..., None, None]
             depth = self.depth_se(depth, depth_se)
-
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.ADAPTIVE_BEV_SIZE:
-            size_mlp_input = self.size_bn(bev_adaptive_params)
-            size_context_se = self.size_context_mlp(size_mlp_input)[..., None, None]
-            context = self.size_context_se(context, size_context_se)
-            size_depth_se = self.size_depth_mlp(size_mlp_input)[..., None, None]
-            depth = self.size_depth_se(depth, size_depth_se)
             
         context = self.context_conv(context)
         depth = self.depth_conv(depth)
