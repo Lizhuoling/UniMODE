@@ -1,0 +1,20 @@
+_BASE_: "Base.yaml"
+SOLVER:
+  TYPE: "sgd"
+  IMS_PER_BATCH: 64
+  BASE_LR: 0.02
+  STEPS: (34800, 46400)
+  MAX_ITER: 58000
+  WARMUP_ITERS: 3625
+TEST:
+  EVAL_PERIOD: 11600
+VIS_PERIOD: 2320
+DATASETS:
+  TRAIN: ('nuScenes_train', 'nuScenes_val', 'SUNRGBD_train', 'SUNRGBD_val',)
+  #TRAIN: ('KITTI_val',)
+  TEST: ('nuScenes_test', 'SUNRGBD_test')
+  #TEST: ('KITTI_val',)
+  CATEGORY_NAMES: ('night stand', 'truck', 'pedestrian', 'traffic cone', 'curtain', 'desk', 'stationery', 'shelves', 'oven', 'refrigerator', 'cup', 'floor mat', 'clothes', 'table', 'bottle', 'trailer', 'television', 'car', 'towel', 'counter', 'door', 'stove', 'cabinet', 'books', 'chair', 'machine', 'window', 'bicycle', 'bed', 'pillow', 'picture', 'laptop', 'bookcase', 'sink', 'bathtub', 'bin', 'shoes', 'lamp', 'bus', 'mirror', 'motorcycle', 'sofa', 'toilet', 'barrier', 'blinds', 'box')
+MODEL:
+  ROI_HEADS:
+    NUM_CLASSES: 46

@@ -1,4 +1,4 @@
-exp_id=TwoStage_base1_nussun
+exp_id=TwoStage_base1_sun_lid
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
