@@ -2,9 +2,9 @@ _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
   TRAIN: ('SUNRGBD_train', 'SUNRGBD_val',)
-  #TRAIN: ('SUNRGBD_val',)
+  #TRAIN: ('KITTI_val',)
   TEST: ('SUNRGBD_test',)
-  #TEST: ('SUNRGBD_val',)
+  #TEST: ('KITTI_val',)
   CATEGORY_NAMES: ('bicycle', 'books', 'bottle', 'chair', 'cup', 'laptop', 'shoes', 'towel', 'blinds', 'window', 'lamp', 'shelves', 'mirror', 'sink', 'cabinet', 'bathtub', 'door', 'toilet', 'desk', 'box', 'bookcase', 'picture', 'table', 'counter', 'bed', 'night stand', 'pillow', 'sofa', 'television', 'floor mat', 'curtain', 'clothes', 'stationery', 'refrigerator', 'bin', 'stove', 'oven', 'machine')
 
 INPUT:
@@ -55,8 +55,6 @@ MODEL:
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
-        TRAIN_GT_CENTER: False
-        BIG_CENTER_HEAD: True
         PROPOSAL_NUMBER: 100
         OBJ_LOSS_WEIGHT: 1.0
         DEPTH_LOSS_WEIGHT: 0.2
