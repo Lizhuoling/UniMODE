@@ -6,9 +6,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from mmcv.cnn import build_conv_layer
 from mmdet.core import multi_apply
+from mmdet.models.backbones.resnet import BasicBlock
 
 from cubercnn.util import torch_dist
+from cubercnn.modeling.detector3d.depthnet import ASPP
 
 
 class CENTER_HEAD(nn.Module):
@@ -25,26 +28,65 @@ class CENTER_HEAD(nn.Module):
         self.offset_loss_weight = cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.OFFSET_LOSS_WEIGHT
 
         # Predict the confidence that concerned objects exist. It works like RPN.
-        self.obj_head = nn.Sequential(
-            nn.Conv2d(in_channels, self.embed_dims, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(self.embed_dims, momentum=0.1), 
-            nn.ReLU(inplace=True),
-            nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True),
-        )
-
-        self.depth_head = nn.Sequential(
-            nn.Conv2d(in_channels, self.embed_dims, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(self.embed_dims, momentum=0.1), 
-            nn.ReLU(inplace=True),
-            nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=0, bias=True)
-        )
-
-        self.offset_head = nn.Sequential(
-            nn.Conv2d(in_channels, self.embed_dims, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(self.embed_dims, momentum=0.1), 
-            nn.ReLU(inplace=True),
-            nn.Conv2d(self.embed_dims, 2, kernel_size=1, padding=0, bias=True)
-        )
+        if cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.BIG_CENTER_HEAD:
+            self.obj_head = nn.Sequential(
+                nn.Conv2d(in_channels, self.embed_dims, kernel_size=1, padding=1 // 2, bias=True),
+                BasicBlock(self.embed_dims, self.embed_dims),
+                ASPP(self.embed_dims, self.embed_dims),
+                build_conv_layer(cfg=dict(type='DCN',
+                    in_channels=self.embed_dims,
+                    out_channels=self.embed_dims,
+                    kernel_size=3,
+                    padding=1,
+                    im2col_step=128,
+                )),
+                nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True),
+            )
+            self.depth_head = nn.Sequential(
+                nn.Conv2d(in_channels, self.embed_dims, kernel_size=1, padding=1 // 2, bias=True),
+                BasicBlock(self.embed_dims, self.embed_dims),
+                ASPP(self.embed_dims, self.embed_dims),
+                build_conv_layer(cfg=dict(type='DCN',
+                    in_channels=self.embed_dims,
+                    out_channels=self.embed_dims,
+                    kernel_size=3,
+                    padding=1,
+                    im2col_step=128,
+                )),
+                nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True),
+            )
+            self.offset_head = nn.Sequential(
+                nn.Conv2d(in_channels, self.embed_dims, kernel_size=1, padding=1 // 2, bias=True),
+                BasicBlock(self.embed_dims, self.embed_dims),
+                ASPP(self.embed_dims, self.embed_dims),
+                build_conv_layer(cfg=dict(type='DCN',
+                    in_channels=self.embed_dims,
+                    out_channels=self.embed_dims,
+                    kernel_size=3,
+                    padding=1,
+                    im2col_step=128,
+                )),
+                nn.Conv2d(self.embed_dims, 2, kernel_size=1, padding=1 // 2, bias=True),
+            )
+        else:
+            self.obj_head = nn.Sequential(
+                nn.Conv2d(in_channels, self.embed_dims, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(self.embed_dims, momentum=0.1), 
+                nn.ReLU(inplace=True),
+                nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True),
+            )
+            self.depth_head = nn.Sequential(
+                nn.Conv2d(in_channels, self.embed_dims, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(self.embed_dims, momentum=0.1), 
+                nn.ReLU(inplace=True),
+                nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=0, bias=True)
+            )
+            self.offset_head = nn.Sequential(
+                nn.Conv2d(in_channels, self.embed_dims, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(self.embed_dims, momentum=0.1), 
+                nn.ReLU(inplace=True),
+                nn.Conv2d(self.embed_dims, 2, kernel_size=1, padding=0, bias=True)
+            )
 
         self.cls_loss_fnc = FocalLoss(2, 4)
 
@@ -76,38 +118,47 @@ class CENTER_HEAD(nn.Module):
         center_conf = center_conf.unsqueeze(-1) # Left shape: (B, num_proposal, 1)
         center_xyz = (Ks.unsqueeze(1).inverse() @ center_uvd.unsqueeze(-1)).squeeze(-1) # Left shape: (B, num_proposal, 3)
 
-        valid_proposal_center_xyz = []
+        tgt_depth_preds = []
+        tgt_offset_preds = []
+        tgt_conf_preds = []
+        tgt_xyz_preds = []
         if self.training:
             # During training, we get proposal points by selecting gt centers.
-            tgt_depth_preds = []
-            tgt_offset_preds = []
             for bs_idx, batch_input in enumerate(batched_inputs):
                 gt_box2d_center = batch_input['instances'].get('gt_featreso_box2d_center').cuda() # Left shape: (num_box, 2)
                 norm_gt_box2d_center = gt_box2d_center.clone()
                 norm_gt_box2d_center[:, 0] = (norm_gt_box2d_center[:, 0] - feat_w / 2) / (feat_w / 2)
                 norm_gt_box2d_center[:, 1] = (norm_gt_box2d_center[:, 1] - feat_h / 2) / (feat_h / 2)
+                # Depth prediction
                 tgt_depth_pred = F.grid_sample(depth_pred[bs_idx][None], norm_gt_box2d_center[None, None])[0, :, 0, :].permute(1, 0).contiguous()    # Left shape: (num_gt, 1)
                 tgt_depth_preds.append(tgt_depth_pred)
+                # Offset prediction
                 tgt_offset_pred = F.grid_sample(offset_pred[bs_idx][None], norm_gt_box2d_center[None, None])[0, :, 0, :].permute(1, 0).contiguous()  # Left shape: (num_gt, 2)
                 tgt_offset_preds.append(tgt_offset_pred)
+                # Conf prediction
+                gt_conf_pred = F.grid_sample(obj_pred[bs_idx][None], norm_gt_box2d_center[None, None])[0, :, 0, :].permute(1, 0).contiguous()  # Left shape: (num_gt, 1)
+                tgt_conf_preds.append(gt_conf_pred)
+
                 tgt_3dcenter_uv_pred = (gt_box2d_center + tgt_offset_pred) * self.downsample_factor   # Left shape: (num_gt, 2)
                 tgt_3dcenter_uvd_pred = torch.cat((tgt_3dcenter_uv_pred * tgt_depth_pred, tgt_depth_pred), dim = -1)    # Left shape: (num_gt, 3)
                 tgt_3dcenter_xyz_pred = (Ks[bs_idx][None].inverse() @ tgt_3dcenter_uvd_pred.unsqueeze(-1)).squeeze(-1)  # Left shape: (num_gt, 3)
-                valid_proposal_center_xyz.append(tgt_3dcenter_xyz_pred.detach())
+                tgt_xyz_preds.append(tgt_3dcenter_xyz_pred)
         else:
             # During inference, we obtain proposal points by confidence filtering
             valid_proposal_mask = (center_conf > self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.PROPOSAL_CONF_THRE).squeeze(-1) # Left shape: (B, valid_proposal_num)
             for bs_idx, bs_mask in enumerate(valid_proposal_mask):
+                bs_valid_center_conf = center_conf[bs_idx][bs_mask]
+                tgt_conf_preds.append(bs_valid_center_conf) # Left shape: (num_valid_proposal, 1)
                 bs_valid_center_xyz = center_xyz[bs_idx][bs_mask] # Left shape: (num_valid_proposal, 3)
-                valid_proposal_center_xyz.append(bs_valid_center_xyz.detach())
-                tgt_depth_preds = None
-                tgt_offset_preds = None
+                tgt_xyz_preds.append(bs_valid_center_xyz)
+
 
         return dict(
             obj_pred = obj_pred,    # Used for computing loss.
             topk_center_conf = center_conf.detach(),    # Used for initializing queries.
             topk_center_xyz = center_xyz.detach(),  # Used for initializing queries.
-            valid_proposal_center_xyz = valid_proposal_center_xyz,  # Used for determining BEV range.
+            tgt_conf_preds = tgt_conf_preds,
+            tgt_xyz_preds = tgt_xyz_preds, 
             tgt_depth_preds = tgt_depth_preds,  # Used for computing loss.
             tgt_offset_preds = tgt_offset_preds,    # Used for computing loss.
         )

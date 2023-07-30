@@ -458,7 +458,7 @@ class PETR_HEAD(nn.Module):
             self.transformer.init_weights()
 
         nn.init.uniform_(self.reference_points.weight.data, 0, 1)
-        self.reference_points.weight.requires_grad = False
+        #self.reference_points.weight.requires_grad = False
 
     def create_frustum(self, img_shape_after_aug, feat_shape):
         ogfW, ogfH = img_shape_after_aug
@@ -530,13 +530,27 @@ class PETR_HEAD(nn.Module):
         tgt = self.tgt_embed.weight[None].expand(B, -1, -1) # Left shape: (B, num_query, L)
 
         if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-            center_conf_pred = center_head_out['topk_center_conf']  # Left shape: (B, num_proposal, 1)
-            topk_center_xyz = center_head_out['topk_center_xyz']    # Left shape: (B, num_proposal, 3)
-            center_conf_emb = self.center_conf_emb(center_conf_pred)    # Left shape: (B, num_proposal, L)
-            center_xyz_emb = self.center_xyz_emb(pos2posemb3d(topk_center_xyz))  # Left shape: (B, num_proposal, L)
-            center_proposal_num = center_conf_emb.shape[1]
-            center_initialized_tgt = tgt[:, :center_proposal_num].clone() + center_conf_emb + center_xyz_emb
-            tgt = torch.cat((center_initialized_tgt, tgt[:, center_proposal_num:]), dim = 1) # Left shape: (B, num_query, L) 
+            if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.TRAIN_GT_CENTER:
+                tgt_conf_preds, tgt_xyz_preds = center_head_out['tgt_conf_preds'], center_head_out['tgt_xyz_preds']
+                tgt_list = []
+                for bs_idx in range(tgt.shape[0]):
+                    center_conf_pred = tgt_conf_preds[bs_idx].detach()  # Left shape: (num_proposal, 1)
+                    topk_center_xyz = tgt_xyz_preds[bs_idx].detach()  # Left shape: (num_proposal, 3)
+                    center_conf_emb = self.center_conf_emb(center_conf_pred)   # Left shape: (num_proposal, L)
+                    center_xyz_emb = self.center_xyz_emb(pos2posemb3d(topk_center_xyz)) # Left shape: (num_proposal, L)
+                    center_proposal_num = center_conf_emb.shape[0]
+                    bs_tgt = tgt[bs_idx].clone()    # Left shape: (num_query, L)
+                    bs_tgt = torch.cat((bs_tgt[:center_proposal_num] + center_conf_emb + center_xyz_emb, bs_tgt[center_proposal_num:]), dim = 0)
+                    tgt_list.append(bs_tgt)
+                tgt = torch.stack(tgt_list, dim = 0)
+            else:
+                center_conf_pred = center_head_out['topk_center_conf'].detach()  # Left shape: (B, num_proposal, 1)
+                topk_center_xyz = center_head_out['topk_center_xyz'].detach()    # Left shape: (B, num_proposal, 3)
+                center_conf_emb = self.center_conf_emb(center_conf_pred)    # Left shape: (B, num_proposal, L)
+                center_xyz_emb = self.center_xyz_emb(pos2posemb3d(topk_center_xyz))  # Left shape: (B, num_proposal, L)
+                center_proposal_num = center_conf_emb.shape[1]
+                center_initialized_tgt = tgt[:, :center_proposal_num].clone() + center_conf_emb + center_xyz_emb
+                tgt = torch.cat((center_initialized_tgt, tgt[:, center_proposal_num:]), dim = 1) # Left shape: (B, num_query, L) 
 
         query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
 

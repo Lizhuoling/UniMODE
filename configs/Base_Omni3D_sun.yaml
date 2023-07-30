@@ -1,0 +1,20 @@
+_BASE_: "Base.yaml"
+SOLVER:
+  TYPE: "sgd"
+  IMS_PER_BATCH: 64
+  BASE_LR: 0.04
+  STEPS: (12000, 16000)
+  MAX_ITER: 20000
+  WARMUP_ITERS: 3625
+TEST:
+  EVAL_PERIOD: 10000
+VIS_PERIOD: 2320
+DATASETS:
+  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val',)
+  #TRAIN: ('KITTI_val',)
+  TEST: ('SUNRGBD_test',)
+  #TEST: ('KITTI_val',)
+  CATEGORY_NAMES: ('bicycle', 'books', 'bottle', 'chair', 'cup', 'laptop', 'shoes', 'towel', 'blinds', 'window', 'lamp', 'shelves', 'mirror', 'sink', 'cabinet', 'bathtub', 'door', 'toilet', 'desk', 'box', 'bookcase', 'picture', 'table', 'counter', 'bed', 'night stand', 'pillow', 'sofa', 'television', 'floor mat', 'curtain', 'clothes', 'stationery', 'refrigerator', 'bin', 'stove', 'oven', 'machine')
+MODEL:
+  ROI_HEADS:
+    NUM_CLASSES: 46
