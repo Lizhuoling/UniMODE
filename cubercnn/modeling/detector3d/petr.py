@@ -458,7 +458,7 @@ class PETR_HEAD(nn.Module):
             self.transformer.init_weights()
 
         nn.init.uniform_(self.reference_points.weight.data, 0, 1)
-        #self.reference_points.weight.requires_grad = False
+        self.reference_points.weight.requires_grad = False
 
     def create_frustum(self, img_shape_after_aug, feat_shape):
         ogfW, ogfH = img_shape_after_aug
@@ -502,6 +502,9 @@ class PETR_HEAD(nn.Module):
         else:
             geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
         geom_xyz[img_mask[:, None, :, :, None].expand_as(geom_xyz)] = -1   # Block feature from invalid image region.
+        if self.cfg.MODEL.DETECTOR3D.PETR.LLS_SPARSE > 0:
+            sparse_mask = depth < self.cfg.MODEL.DETECTOR3D.PETR.LLS_SPARSE # Left shape: (B, D, H, W)
+            geom_xyz[sparse_mask.unsqueeze(-1).expand_as(geom_xyz)] = -1
         # Notably, the BEV feature shape should be (B, C bev_z, bev_x) rather than (B, C bev_y, bev_x).
         bev_feat = voxel_pooling_train(geom_xyz.contiguous(), img_feat_with_depth.contiguous(), self.voxel_num.cuda())   # Left shape: (B, C, bev_z, bev_x)
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])

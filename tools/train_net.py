@@ -195,6 +195,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
 
             # forward
             loss_dict = model(data)
+            #continue    # For debug
             losses = sum(loss_dict.values())
 
             # reduce
