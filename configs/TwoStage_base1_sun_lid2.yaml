@@ -2,9 +2,9 @@ _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
   TRAIN: ('SUNRGBD_train', 'SUNRGBD_val',)
-  #TRAIN: ('SUNRGBD_val',)
+  #TRAIN: ('KITTI_val',)
   TEST: ('SUNRGBD_test',)
-  #TEST: ('SUNRGBD_val',)
+  #TEST: ('KITTI_val',)
   CATEGORY_NAMES: ('bicycle', 'books', 'bottle', 'chair', 'cup', 'laptop', 'shoes', 'towel', 'blinds', 'window', 'lamp', 'shelves', 'mirror', 'sink', 'cabinet', 'bathtub', 'door', 'toilet', 'desk', 'box', 'bookcase', 'picture', 'table', 'counter', 'bed', 'night stand', 'pillow', 'sofa', 'television', 'floor mat', 'curtain', 'clothes', 'stationery', 'refrigerator', 'bin', 'stove', 'oven', 'machine')
 
 INPUT:
@@ -44,7 +44,7 @@ MODEL:
       GRID_MASK: False
 
       BACKBONE_NAME: 'VoVNet'
-      BACKBONE_FP16: False
+      BACKBONE_FP16: True
       NECK_NAME: 'SECONDFPN'
       TRANSFORMER_NAME: 'DEFORMABLE_TRANSFORMER'
       MATCHER_NAME: 'HungarianAssigner3D'
@@ -52,7 +52,6 @@ MODEL:
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
       DOWNSAMPLE_FACTOR: 16
       LID: True
-      LLS_SPARSE: 0.001
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
