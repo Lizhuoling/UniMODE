@@ -1,4 +1,4 @@
-exp_id=TwoStage_base1_omni3d_out_removepeople
+exp_id=TwoStage_base1_sun_sunrange
 
 CUDA_VISIBLE_DEVICES=3 python tools/train_net.py \
   --eval-only \

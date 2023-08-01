@@ -614,6 +614,7 @@ class PETR_HEAD(nn.Module):
         max_cls_scores, max_cls_idxs = cls_scores.max(-1) # max_cls_scores shape: (B, num_query), max_cls_idxs shape: (B, num_query)
         confs_3d_base_2d = torch.clamp(1 - bbox_preds[...,  self.reg_key_manager('uncern')].exp().squeeze(-1) / 10, min = 1e-3, max = 1)   # Left shape: (B, num_query)
         confs_3d = max_cls_scores * confs_3d_base_2d
+        
         inference_results = []
         for bs in range(B):
             bs_instance = Instances(image_size = (batched_inputs[bs]['height'], batched_inputs[bs]['width']))
