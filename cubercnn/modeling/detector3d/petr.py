@@ -848,14 +848,17 @@ class PETR_HEAD(nn.Module):
                 pdb.set_trace()
             else:
                 continue'''
-            '''corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_preds, bs_dim_preds.exp()), dim = 1), R = bs_pose_gts)
+            '''#corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_preds, bs_dim_preds.exp()), dim = 1), R = bs_pose_preds)
+            corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_gts, bs_dim_gts), dim = 1), R = bs_pose_gts)
             corners_2d = corners_2d[:, :, :2].detach()
             box2d = torch.cat((corners_2d.min(dim = 1)[0], corners_2d.max(dim = 1)[0]), dim = -1)
             for box in box2d:
                 box = box.detach().cpu().numpy().astype(np.int32)
                 cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 2)
-            for idx in range(bs_loc_preds.shape[0]):
-                draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_preds[idx].detach().cpu(), bs_dim_preds[idx].exp().detach().cpu()), dim = 0).numpy(), bs_pose_preds[idx].detach().cpu().numpy())
+            #for idx in range(bs_loc_preds.shape[0]):
+                #draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_preds[idx].detach().cpu(), bs_dim_preds[idx].exp().detach().cpu()), dim = 0).numpy(), bs_pose_preds[idx].detach().cpu().numpy())
+            for idx in range(bs_loc_gts.shape[0]):
+                draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_gts[idx].detach().cpu(), bs_dim_gts[idx].detach().cpu()), dim = 0).numpy(), bs_pose_gts[idx].detach().cpu().numpy())
             gt_boxes3D = batched_inputs[bs]['instances']._fields['gt_boxes3D']
             gt_proj_centers = gt_boxes3D[:, 0:2]    # The projected 3D centers have been resized.
             for gt_proj_center in gt_proj_centers:

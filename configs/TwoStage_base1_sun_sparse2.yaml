@@ -9,7 +9,7 @@ DATASETS:
 
 INPUT:
   RESIZE_TGT_SIZE: (1280, 1024)
-  RANDOM_FLIP: "horizontal"
+  RANDOM_FLIP: "none"
   COLOR_AUG: True
 
 SOLVER:

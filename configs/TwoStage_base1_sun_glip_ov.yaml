@@ -1,19 +1,19 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val',)
-  #TRAIN: ('SUNRGBD_val',)
-  TEST: ('SUNRGBD_test',)
-  #TEST: ('SUNRGBD_val',)
+  #TRAIN: ('SUNRGBD_train', 'SUNRGBD_val',)
+  TRAIN: ('SUNRGBD_val',)
+  #TEST: ('SUNRGBD_test',)
+  TEST: ('SUNRGBD_val',)
   CATEGORY_NAMES: ('bicycle', 'books', 'bottle', 'chair', 'cup', 'laptop', 'shoes', 'towel', 'blinds', 'window', 'lamp', 'shelves', 'mirror', 'sink', 'cabinet', 'bathtub', 'door', 'toilet', 'desk', 'box', 'bookcase', 'picture', 'table', 'counter', 'bed', 'night stand', 'pillow', 'sofa', 'television', 'floor mat', 'curtain', 'clothes', 'stationery', 'refrigerator', 'bin', 'stove', 'oven', 'machine')
 
 INPUT:
   RESIZE_TGT_SIZE: (1280, 1024)
-  RANDOM_FLIP: "horizontal"
+  RANDOM_FLIP: "none"
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 8 #64
   TYPE: "mmcv_AdamW"
   BASE_LR: 4e-4
   WEIGHT_DECAY: 1e-2

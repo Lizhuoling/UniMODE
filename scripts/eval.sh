@@ -1,4 +1,4 @@
-exp_id=TwoStage_base1_sun_sunrange
+exp_id=TwoStage_base1_sun_glip_ov
 
 CUDA_VISIBLE_DEVICES=3 python tools/train_net.py \
   --eval-only \
