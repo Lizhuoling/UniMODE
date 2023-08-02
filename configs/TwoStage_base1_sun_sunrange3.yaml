@@ -13,11 +13,11 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 32
   TYPE: "mmcv_AdamW"
-  BASE_LR: 4e-4
+  BASE_LR: 2e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 20000
+  MAX_ITER: 29000
   VIRTUAL_EPOCHS: 20
 
   LR_SCHEDULER_NAME: "CosineAnnealing"
@@ -31,7 +31,7 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 5000
+  EVAL_PERIOD: 5800
 
 MODEL:
   META_ARCHITECTURE: "OV_3D_Det"
@@ -44,15 +44,14 @@ MODEL:
       GRID_MASK: False
 
       BACKBONE_NAME: 'VoVNet'
-      BACKBONE_FP16: False
+      BACKBONE_FP16: True
       NECK_NAME: 'SECONDFPN'
       TRANSFORMER_NAME: 'DEFORMABLE_TRANSFORMER'
       MATCHER_NAME: 'HungarianAssigner3D'
       NUM_QUERY: 200
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
       DOWNSAMPLE_FACTOR: 16
-      LID: True
-      LLS_SPARSE: 0.01
+      LID: False
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
@@ -75,9 +74,9 @@ MODEL:
         ENC_NUM: 1
         DEC_NUM: 6
 
-        POSITION_RANGE: [-60, 60, -20, 35, 0, 80]
-        GRID_SIZE: [0.5, 55, 0.5]
-        D_BOUND: [0.1, 100, 1]
+        POSITION_RANGE: [-20, 20, -10, 15, 0, 20]
+        GRID_SIZE: [0.4, 25, 0.4]
+        D_BOUND: [0.1, 20, 0.2]
         ENC_CAM_INTRINSIC: True  #  Set to a value bigger than 0 means using virtual focal depth.
 
       POST_PROCESS:
