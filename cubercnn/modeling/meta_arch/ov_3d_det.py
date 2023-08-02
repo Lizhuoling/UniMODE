@@ -264,7 +264,8 @@ class OV_3D_Det(BaseModule):
                 if gt_key in ('gt_boxes', 'gt_keypoints'):
                     batch_input['instances']._fields[gt_key].tensor = batch_input['instances']._fields[gt_key].tensor[valid_gt_mask]
                 else:
-                    batch_input['instances']._fields[gt_key] = batch_input['instances']._fields[gt_key][valid_gt_mask]
+                    if gt_key in batch_input['instances']._fields.keys():
+                        batch_input['instances']._fields[gt_key] = batch_input['instances']._fields[gt_key][valid_gt_mask]
 
         return batched_inputs
 

@@ -147,9 +147,10 @@ class DETECTOR_PETR(BaseModule):
         )
 
     def loss(self, detector_out, batched_inputs, ori_img_resolution, novel_cls_gts = None):
-        center_head_loss_dict = self.center_head.loss(detector_out['center_head_out'], detector_out['Ks'], batched_inputs)
         loss_dict = self.petr_head.loss(detector_out['petr_out'], batched_inputs, ori_img_resolution, novel_cls_gts)
-        loss_dict.update(center_head_loss_dict)
+        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            center_head_loss_dict = self.center_head.loss(detector_out['center_head_out'], detector_out['Ks'], batched_inputs)
+            loss_dict.update(center_head_loss_dict)
         return loss_dict
     
     def inference(self, detector_out, batched_inputs, ori_img_resolution):
@@ -188,7 +189,7 @@ def backbone_cfgs(backbone_name, cfg):
             type='ResNet',
             depth=50,
             num_stages=4,
-            out_indices=(2, 3,),
+            out_indices=cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS,
             frozen_stages=-1,
             norm_cfg=dict(type='BN2d', requires_grad=False),
             norm_eval=False,
@@ -198,13 +199,26 @@ def backbone_cfgs(backbone_name, cfg):
             stage_with_dcn=(False, False, True, True),
             pretrained = 'MODEL/resnet50_msra-5891d200.pth',
         ),
+        ResNet101 = dict(
+            type='ResNet',
+            depth=101,
+            num_stages=4,
+            out_indices=cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS,
+            frozen_stages=1,
+            norm_cfg=dict(type='BN2d', requires_grad=False),
+            norm_eval=True,
+            style='caffe',
+            dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
+            stage_with_dcn=(False, False, True, True),
+            pretrained = 'MODEL/resnet101_caffe-3ad79236.pth',
+        ),
         VoVNet = dict(
             type='VoVNet', ###use checkpoint to save memory
             spec_name='V-99-eSE',
             norm_eval=False,
             frozen_stages=-1,
             input_ch=3,
-            out_features=cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS, #('stage3', 'stage4', 'stage5'),
+            out_features=cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS,
             pretrained = 'MODEL/fcos3d_vovnet_imgbackbone_omni3d.pth',
         ),
         EVA_Base = dict(
@@ -224,22 +238,21 @@ def backbone_cfgs(backbone_name, cfg):
     return cfgs[backbone_name]
 
 def neck_cfgs(neck_name, cfg):
+    if cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('ResNet50', 'ResNet101'):
+        in_channels = [256, 512, 1024, 2048]
+    elif cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('VoVNet',):
+        in_channels = [256, 512, 768, 1024]
+
     cfgs = dict(
-        CPFPN_Res50 = dict(
-            type='CPFPN',
-            in_channels=[1024, 2048],
-            out_channels=256,
-            num_outs=2,
-        ),
         CPFPN_VoV = dict(
             type='CPFPN',
-            in_channels=[512, 768, 1024],
+            in_channels=in_channels,
             out_channels=256,
             num_outs=len(cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS),
         ),
         SECONDFPN = dict(
             type='SECONDFPN',
-            in_channels=[256, 512, 768, 1024],
+            in_channels=in_channels,
             upsample_strides=[0.25, 0.5, 1, 2],
             out_channels=[128, 128, 128, 128]
         ),
@@ -907,8 +920,9 @@ class PETR_HEAD(nn.Module):
             batched_inputs[batch_id]['instances']._fields['gt_poses'] = batched_inputs[batch_id]['instances']._fields['gt_poses'][instance_in_rang_flag]
             batched_inputs[batch_id]['instances']._fields['gt_keypoints'] = batched_inputs[batch_id]['instances']._fields['gt_keypoints'][instance_in_rang_flag]
             batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'] = batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'][instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'][instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'][instance_in_rang_flag]
+            if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+                batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'][instance_in_rang_flag]
+                batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'][instance_in_rang_flag]
         return batched_inputs
         
 def pos2posemb3d(pos, num_pos_feats=128, temperature=10000):
