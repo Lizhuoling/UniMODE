@@ -899,7 +899,7 @@ class PETR_HEAD(nn.Module):
             loss_dict['dim_loss_{}'.format(dec_idx)] += self.dim_weight * self.reg_loss(bs_dim_preds, bs_dim_gts.log()).sum()
 
             # Pose loss
-            loss_dict['pose_loss_{}'.format(dec_idx)] += self.pose_weight * (1 - so3_relative_angle(bs_pose_preds, bs_pose_gts, eps=1, cos_angle=True)).sum()
+            loss_dict['pose_loss_{}'.format(dec_idx)] += self.pose_weight * (1 - so3_relative_angle(bs_pose_preds, bs_pose_gts, eps=100, cos_angle=True)).sum()
 
             # 2D IOU loss between 2D boxes converted from 3D box predictions and pseudo 2D box GTs.
             if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:

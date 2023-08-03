@@ -1,4 +1,4 @@
-exp_id=TwoStage_base2_sun_range_loss3x
+exp_id=TwoStage_base2_omni3d_out
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
