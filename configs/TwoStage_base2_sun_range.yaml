@@ -1,10 +1,10 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val',)
-  #TRAIN: ('SUNRGBD_val',)
-  TEST: ('SUNRGBD_test',)
-  #TEST: ('SUNRGBD_val',)
+  #TRAIN: ('SUNRGBD_train', 'SUNRGBD_val',)
+  TRAIN: ('SUNRGBD_val',)
+  #TEST: ('SUNRGBD_test',)
+  TEST: ('SUNRGBD_val',)
   CATEGORY_NAMES: ('bicycle', 'books', 'bottle', 'chair', 'cup', 'laptop', 'shoes', 'towel', 'blinds', 'window', 'lamp', 'shelves', 'mirror', 'sink', 'cabinet', 'bathtub', 'door', 'toilet', 'desk', 'box', 'bookcase', 'picture', 'table', 'counter', 'bed', 'night stand', 'pillow', 'sofa', 'television', 'floor mat', 'curtain', 'clothes', 'stationery', 'refrigerator', 'bin', 'stove', 'oven', 'machine')
 
 INPUT:
@@ -13,11 +13,11 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 32
   TYPE: "mmcv_AdamW"
-  BASE_LR: 4e-4
+  BASE_LR: 2e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 20000
+  MAX_ITER: 29000
   VIRTUAL_EPOCHS: 20
 
   LR_SCHEDULER_NAME: "CosineAnnealing"
@@ -31,7 +31,7 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 10000
+  EVAL_PERIOD: 5800
 
 MODEL:
   META_ARCHITECTURE: "OV_3D_Det"
@@ -52,9 +52,10 @@ MODEL:
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
       DOWNSAMPLE_FACTOR: 16
       LID: False
+      LLS_SPARSE: -1.0
 
       CENTER_PROPOSAL:
-        USE_CENTER_PROPOSAL: True
+        USE_CENTER_PROPOSAL: False
         PROPOSAL_NUMBER: 100
         OBJ_LOSS_WEIGHT: 1.0
         DEPTH_LOSS_WEIGHT: 0.2
@@ -62,7 +63,7 @@ MODEL:
         PROPOSAL_CONF_THRE: 0.2
 
       HEAD:
-        OV_CLS_HEAD: False
+        OV_CLS_HEAD: True
         UNCERN_RANGE: [-10, 10]
         CLS_WEIGHT: 2.0
         LOC_WEIGHT: 0.25
@@ -74,9 +75,9 @@ MODEL:
         ENC_NUM: 1
         DEC_NUM: 6
 
-        POSITION_RANGE: [-5, 5, -3, 2, 0.4, 10]
-        GRID_SIZE: [0.2, 5, 0.2]
-        D_BOUND: [0.4, 15, 0.2]
+        POSITION_RANGE: [-20, 20, -10, 15, 0, 20]
+        GRID_SIZE: [0.4, 25, 0.4]
+        D_BOUND: [0.1, 20, 0.2]
         ENC_CAM_INTRINSIC: True  #  Set to a value bigger than 0 means using virtual focal depth.
 
       POST_PROCESS:
@@ -85,8 +86,8 @@ MODEL:
         OUTPUT_CONFIDENCE: '3D'
 
   GLIP_MODEL:
-    USE_GLIP: False
-    GLIP_INITIALIZE_QUERY: False
+    USE_GLIP: True
+    GLIP_INITIALIZE_QUERY: True
     NO_GRADIENT: True
     GLIP_WEIGHT: "MODEL/glip_a_tiny_o365.pth"
 
