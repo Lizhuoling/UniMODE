@@ -65,10 +65,10 @@ MODEL:
       HEAD:
         OV_CLS_HEAD: False
         UNCERN_RANGE: [-10, 10]
-        CLS_WEIGHT: 2.0
+        CLS_WEIGHT: 6.0
         LOC_WEIGHT: 0.75
-        DIM_WEIGHT: 0.25
-        POSE_WEIGHT: 0.25
+        DIM_WEIGHT: 0.75
+        POSE_WEIGHT: 0.75
         DET_2D_L1_WEIGHT: 5.0
         DET_2D_GIOU_WEIGHT: 2.0
 

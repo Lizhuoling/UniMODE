@@ -187,20 +187,21 @@ class DETECTOR_PETR(BaseModule):
 
     def remove_instance_out_range(self, batched_inputs):
         for batch_id in range(len(batched_inputs)):
-            gt_centers = batched_inputs[batch_id]['instances']._fields['gt_boxes3D'][:, 6:9]    # Left shape: (num_gt, 3)
-            instance_in_rang_flag = (gt_centers[:, 0] > self.position_range[0]) & (gt_centers[:, 0] < self.position_range[1]) & \
-                (gt_centers[:, 1] > self.position_range[2]) & (gt_centers[:, 1] < self.position_range[3]) & \
-                (gt_centers[:, 2] > self.position_range[4]) & (gt_centers[:, 2] < self.position_range[5])   # Left shape: (num_gt)
+            if 'instances' in batched_inputs[batch_id].keys():
+                gt_centers = batched_inputs[batch_id]['instances']._fields['gt_boxes3D'][:, 6:9]    # Left shape: (num_gt, 3)
+                instance_in_rang_flag = (gt_centers[:, 0] > self.position_range[0]) & (gt_centers[:, 0] < self.position_range[1]) & \
+                    (gt_centers[:, 1] > self.position_range[2]) & (gt_centers[:, 1] < self.position_range[3]) & \
+                    (gt_centers[:, 2] > self.position_range[4]) & (gt_centers[:, 2] < self.position_range[5])   # Left shape: (num_gt)
 
-            batched_inputs[batch_id]['instances']._fields['gt_classes'] = batched_inputs[batch_id]['instances']._fields['gt_classes'][instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_boxes'].tensor = batched_inputs[batch_id]['instances']._fields['gt_boxes'].tensor[instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_boxes3D'] = batched_inputs[batch_id]['instances']._fields['gt_boxes3D'][instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_poses'] = batched_inputs[batch_id]['instances']._fields['gt_poses'][instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_keypoints'] = batched_inputs[batch_id]['instances']._fields['gt_keypoints'][instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'] = batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'][instance_in_rang_flag]
-            if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-                batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'][instance_in_rang_flag]
-                batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'][instance_in_rang_flag]
+                batched_inputs[batch_id]['instances']._fields['gt_classes'] = batched_inputs[batch_id]['instances']._fields['gt_classes'][instance_in_rang_flag]
+                batched_inputs[batch_id]['instances']._fields['gt_boxes'].tensor = batched_inputs[batch_id]['instances']._fields['gt_boxes'].tensor[instance_in_rang_flag]
+                batched_inputs[batch_id]['instances']._fields['gt_boxes3D'] = batched_inputs[batch_id]['instances']._fields['gt_boxes3D'][instance_in_rang_flag]
+                batched_inputs[batch_id]['instances']._fields['gt_poses'] = batched_inputs[batch_id]['instances']._fields['gt_poses'][instance_in_rang_flag]
+                batched_inputs[batch_id]['instances']._fields['gt_keypoints'] = batched_inputs[batch_id]['instances']._fields['gt_keypoints'][instance_in_rang_flag]
+                batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'] = batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'][instance_in_rang_flag]
+                if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+                    batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'][instance_in_rang_flag]
+                    batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'][instance_in_rang_flag]
         return batched_inputs
 
 def backbone_cfgs(backbone_name, cfg):
