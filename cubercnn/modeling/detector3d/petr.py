@@ -47,6 +47,7 @@ class DETECTOR_PETR(BaseModule):
         super().__init__()
         self.cfg = cfg
         self.fp16_enabled = cfg.MODEL.DETECTOR3D.PETR.BACKBONE_FP16
+        self.position_range = cfg.MODEL.DETECTOR3D.PETR.HEAD.POSITION_RANGE
 
         self.img_mean = torch.Tensor(self.cfg.MODEL.PIXEL_MEAN)  # (b, g, r)
         self.img_std = torch.Tensor(self.cfg.MODEL.PIXEL_STD)
@@ -99,6 +100,8 @@ class DETECTOR_PETR(BaseModule):
         return feat
 
     def forward(self, images, batched_inputs, glip_results, class_name_emb):
+        batched_inputs = self.remove_instance_out_range(batched_inputs)
+
         Ks, scale_ratios = self.transform_intrinsics(images, batched_inputs)    # Transform the camera intrsincis based on input image augmentations.
         masks = self.generate_mask(images)  # Generate image mask for detr. masks shape: (b, h, w)
         pad_img_resolution = (images.tensor.shape[3],images.tensor.shape[2])
@@ -180,8 +183,25 @@ class DETECTOR_PETR(BaseModule):
         for idx, batched_input in enumerate(range(bs)):
             valid_img_h, valid_img_w = images[idx].shape[1], images[idx].shape[2]
             masks[idx][:valid_img_h, :valid_img_w] = 0
-
         return masks
+
+    def remove_instance_out_range(self, batched_inputs):
+        for batch_id in range(len(batched_inputs)):
+            gt_centers = batched_inputs[batch_id]['instances']._fields['gt_boxes3D'][:, 6:9]    # Left shape: (num_gt, 3)
+            instance_in_rang_flag = (gt_centers[:, 0] > self.position_range[0]) & (gt_centers[:, 0] < self.position_range[1]) & \
+                (gt_centers[:, 1] > self.position_range[2]) & (gt_centers[:, 1] < self.position_range[3]) & \
+                (gt_centers[:, 2] > self.position_range[4]) & (gt_centers[:, 2] < self.position_range[5])   # Left shape: (num_gt)
+
+            batched_inputs[batch_id]['instances']._fields['gt_classes'] = batched_inputs[batch_id]['instances']._fields['gt_classes'][instance_in_rang_flag]
+            batched_inputs[batch_id]['instances']._fields['gt_boxes'].tensor = batched_inputs[batch_id]['instances']._fields['gt_boxes'].tensor[instance_in_rang_flag]
+            batched_inputs[batch_id]['instances']._fields['gt_boxes3D'] = batched_inputs[batch_id]['instances']._fields['gt_boxes3D'][instance_in_rang_flag]
+            batched_inputs[batch_id]['instances']._fields['gt_poses'] = batched_inputs[batch_id]['instances']._fields['gt_poses'][instance_in_rang_flag]
+            batched_inputs[batch_id]['instances']._fields['gt_keypoints'] = batched_inputs[batch_id]['instances']._fields['gt_keypoints'][instance_in_rang_flag]
+            batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'] = batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'][instance_in_rang_flag]
+            if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+                batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'][instance_in_rang_flag]
+                batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'][instance_in_rang_flag]
+        return batched_inputs
 
 def backbone_cfgs(backbone_name, cfg):
     cfgs = dict(
@@ -736,8 +756,6 @@ class PETR_HEAD(nn.Module):
     def loss(self, detector_out, batched_inputs, ori_img_resolution, novel_cls_gts = None):
         all_cls_scores = detector_out['all_cls_scores'] # Left shape: (num_dec, B, num_query, cls_num)
         all_bbox_preds = detector_out['all_bbox_preds'] # Left shape: (num_dec, B, num_query, attr_num)
-
-        batched_inputs = self.remove_instance_out_range(batched_inputs)
         
         num_dec_layers = all_cls_scores.shape[0]
         batched_inputs_list = [batched_inputs for _ in range(num_dec_layers)]
@@ -837,32 +855,29 @@ class PETR_HEAD(nn.Module):
             initial_reso = torch.Tensor([initial_w, initial_h, initial_w, initial_h]).to(img_reso.device)
             Ks = torch.Tensor(np.array(batched_inputs[bs]['K'])).cuda()
             Ks[0, :] = Ks[0, :] * ori_img_resolution[bs][0] / initial_w
-            Ks[1, :] = Ks[1, :] * ori_img_resolution[bs][1] / initial_h'''
-            '''if novel_cls_gts[bs]['labels'].shape[0] != 0:
-                pseudo_box2d_gt = novel_cls_gts[bs]['bbox'] # Left shape: (num_box, 4)
-                pseudo_box2d_gt = torch.cat((ori_img_resolution[bs], ori_img_resolution[bs]), dim = 0)[None] * pseudo_box2d_gt
-                pseudo_box2d_gt = pseudo_box2d_gt.int().cpu().numpy()
-                for box in pseudo_box2d_gt:
-                    cv2.rectangle(img, box[0:2], box[2:4], color=(255, 0, 0), thickness = 2)
-                cv2.imwrite('vis.png', img)
-                pdb.set_trace()
-            else:
-                continue'''
-            '''#corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_preds, bs_dim_preds.exp()), dim = 1), R = bs_pose_preds)
-            corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_gts, bs_dim_gts), dim = 1), R = bs_pose_gts)
-            corners_2d = corners_2d[:, :, :2].detach()
-            box2d = torch.cat((corners_2d.min(dim = 1)[0], corners_2d.max(dim = 1)[0]), dim = -1)
-            for box in box2d:
-                box = box.detach().cpu().numpy().astype(np.int32)
-                cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 2)
-            #for idx in range(bs_loc_preds.shape[0]):
-                #draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_preds[idx].detach().cpu(), bs_dim_preds[idx].exp().detach().cpu()), dim = 0).numpy(), bs_pose_preds[idx].detach().cpu().numpy())
+            Ks[1, :] = Ks[1, :] * ori_img_resolution[bs][1] / initial_h
+            # draw predictions
+            #pred_corners_2d, pred_corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_preds, bs_dim_preds.exp()), dim = 1), R = bs_pose_preds)
+            #pred_corners_2d = pred_corners_2d[:, :, :2].detach()
+            #pred_box2d = torch.cat((pred_corners_2d.min(dim = 1)[0], pred_corners_2d.max(dim = 1)[0]), dim = -1)
+            #for box in pred_box2d:
+            #    box = box.detach().cpu().numpy().astype(np.int32)
+            #    cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
+            for idx in range(bs_loc_preds.shape[0]):
+                draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_preds[idx].detach().cpu(), bs_dim_preds[idx].exp().detach().cpu()), dim = 0).numpy(), bs_pose_preds[idx].detach().cpu().numpy(), color=(0,255,0), thickness=2)
+            # draw labels
+            gt_corners_2d, gt_corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_gts, bs_dim_gts), dim = 1), R = bs_pose_gts)
+            gt_corners_2d = gt_corners_2d[:, :, :2].detach()
+            gt_box2d = torch.cat((gt_corners_2d.min(dim = 1)[0], gt_corners_2d.max(dim = 1)[0]), dim = -1)
+            #for box in gt_box2d:
+            #    box = box.detach().cpu().numpy().astype(np.int32)
+            #    cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (255, 0, 0), 2)
             for idx in range(bs_loc_gts.shape[0]):
-                draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_gts[idx].detach().cpu(), bs_dim_gts[idx].detach().cpu()), dim = 0).numpy(), bs_pose_gts[idx].detach().cpu().numpy())
+                draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_gts[idx].detach().cpu(), bs_dim_gts[idx].detach().cpu()), dim = 0).numpy(), bs_pose_gts[idx].detach().cpu().numpy(), color=(0,0,255), thickness=2)
             gt_boxes3D = batched_inputs[bs]['instances']._fields['gt_boxes3D']
-            gt_proj_centers = gt_boxes3D[:, 0:2]    # The projected 3D centers have been resized.
-            for gt_proj_center in gt_proj_centers:
-                cv2.circle(img, gt_proj_center.cpu().numpy().astype(np.int32), radius = 3, color = (0, 0, 255), thickness = -1)
+            #gt_proj_centers = gt_boxes3D[:, 0:2]    # The projected 3D centers have been resized.
+            #for gt_proj_center in gt_proj_centers:
+            #    cv2.circle(img, gt_proj_center.cpu().numpy().astype(np.int32), radius = 3, color = (0, 0, 255), thickness = -1)
             cv2.imwrite('vis.png', img)
             pdb.set_trace()'''
             
@@ -944,24 +959,6 @@ class PETR_HEAD(nn.Module):
     def get_2D_matching_single(self, cls_scores, proj3dcenter_pred, novel_cls_gt, ori_img_resolution, assign_result):
         assign_results = self.matcher_2D.assign(cls_scores, proj3dcenter_pred, novel_cls_gt, ori_img_resolution, assign_result)
         return assign_results
-
-    def remove_instance_out_range(self, batched_inputs):
-        for batch_id in range(len(batched_inputs)):
-            gt_centers = batched_inputs[batch_id]['instances']._fields['gt_boxes3D'][:, 6:9]    # Left shape: (num_gt, 3)
-            instance_in_rang_flag = (gt_centers[:, 0] > self.position_range[0]) & (gt_centers[:, 0] < self.position_range[1]) & \
-                (gt_centers[:, 1] > self.position_range[2]) & (gt_centers[:, 1] < self.position_range[3]) & \
-                (gt_centers[:, 2] > self.position_range[4]) & (gt_centers[:, 2] < self.position_range[5])   # Left shape: (num_gt)
-
-            batched_inputs[batch_id]['instances']._fields['gt_classes'] = batched_inputs[batch_id]['instances']._fields['gt_classes'][instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_boxes'].tensor = batched_inputs[batch_id]['instances']._fields['gt_boxes'].tensor[instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_boxes3D'] = batched_inputs[batch_id]['instances']._fields['gt_boxes3D'][instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_poses'] = batched_inputs[batch_id]['instances']._fields['gt_poses'][instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_keypoints'] = batched_inputs[batch_id]['instances']._fields['gt_keypoints'][instance_in_rang_flag]
-            batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'] = batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'][instance_in_rang_flag]
-            if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-                batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'][instance_in_rang_flag]
-                batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'][instance_in_rang_flag]
-        return batched_inputs
         
 def pos2posemb3d(pos, num_pos_feats=128, temperature=10000):
     scale = 2 * math.pi

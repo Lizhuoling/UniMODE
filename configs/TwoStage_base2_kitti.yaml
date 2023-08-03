@@ -1,11 +1,10 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val',)
-  #TRAIN: ('SUNRGBD_val',)
-  TEST: ('SUNRGBD_test',)
-  #TEST: ('SUNRGBD_val',)
-  CATEGORY_NAMES: ('bicycle', 'books', 'bottle', 'chair', 'cup', 'laptop', 'shoes', 'towel', 'blinds', 'window', 'lamp', 'shelves', 'mirror', 'sink', 'cabinet', 'bathtub', 'door', 'toilet', 'desk', 'box', 'bookcase', 'picture', 'table', 'counter', 'bed', 'night stand', 'pillow', 'sofa', 'television', 'floor mat', 'curtain', 'clothes', 'stationery', 'refrigerator', 'bin', 'stove', 'oven', 'machine')
+  TRAIN: ('KITTI_train', 'KITTI_val',)
+  #TRAIN: ('KITTI_val',)
+  TEST: ('KITTI_test',)
+  CATEGORY_NAMES: ('cyclist', 'pedestrian', 'car', 'van', 'truck')
 
 INPUT:
   RESIZE_TGT_SIZE: (1280, 1024)
@@ -51,7 +50,7 @@ MODEL:
       NUM_QUERY: 200
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
       DOWNSAMPLE_FACTOR: 16
-      LID: False
+      LID: True
       LLS_SPARSE: -1.0
 
       CENTER_PROPOSAL:
@@ -75,13 +74,13 @@ MODEL:
         ENC_NUM: 1
         DEC_NUM: 6
 
-        POSITION_RANGE: [-5, 5, -3, 2, 0.4, 10]
-        GRID_SIZE: [0.2, 5, 0.2]
-        D_BOUND: [0.4, 15, 0.2]
+        POSITION_RANGE: [-60, 60, -20, 35, 0, 80]
+        GRID_SIZE: [1, 55, 1]
+        D_BOUND: [0.1, 100, 1]
         ENC_CAM_INTRINSIC: True  #  Set to a value bigger than 0 means using virtual focal depth.
 
       POST_PROCESS:
-        CONFIDENCE_2D_THRE: 0.4 #0.0
+        CONFIDENCE_2D_THRE: 0.0
         CONFIDENCE_3D_THRE: -1.0
         OUTPUT_CONFIDENCE: '3D'
 

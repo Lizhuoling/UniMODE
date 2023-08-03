@@ -204,7 +204,7 @@ class CENTER_HEAD(nn.Module):
 
         depth_pred = tgt_depth_pred # Left shape: (num_box, 1)
         offset_pred = tgt_offset_pred  # Left shape: (num_box, 2)
-        
+
         depth_loss = self.depth_loss_weight * F.l1_loss(depth_pred, gt_depth, reduction = 'sum')
         offset_loss = self.offset_loss_weight * F.l1_loss(offset_pred, gt_2dto3d_offset, reduction = 'sum')
         
