@@ -1,4 +1,4 @@
-exp_id=TwoStage_base2_omni3d_out
+exp_id=TwoStage_base2_nusar
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \

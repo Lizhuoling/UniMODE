@@ -1,9 +1,9 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val')
-  TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test') 
-  CATEGORY_NAMES: ('stationery', 'sink', 'table', 'floor mat', 'bottle', 'bookcase', 'bin', 'blinds', 'pillow', 'bicycle', 'refrigerator', 'night stand', 'chair', 'sofa', 'books', 'oven', 'towel', 'cabinet', 'window', 'curtain', 'bathtub', 'laptop', 'desk', 'television', 'clothes', 'stove', 'cup', 'shelves', 'box', 'shoes', 'mirror', 'door', 'picture', 'lamp', 'machine', 'counter', 'bed', 'toilet')
+  TRAIN: ('ARKitScenes_train', 'ARKitScenes_val')
+  TEST: ('ARKitScenes_test',) 
+  CATEGORY_NAMES: ('table', 'bed', 'sofa', 'television', 'refrigerator', 'chair', 'oven', 'machine', 'stove', 'shelves', 'sink', 'cabinet', 'bathtub', 'toilet')
 
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)
@@ -15,7 +15,7 @@ SOLVER:
   TYPE: "mmcv_AdamW"
   BASE_LR: 8e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 116000
+  MAX_ITER: 29000
   VIRTUAL_EPOCHS: 20
 
   LR_SCHEDULER_NAME: "CosineAnnealing"
@@ -29,7 +29,7 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 29000
+  EVAL_PERIOD: 7250
 
 MODEL:
   META_ARCHITECTURE: "OV_3D_Det"

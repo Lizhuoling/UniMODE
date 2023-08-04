@@ -1,9 +1,9 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val')
-  TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test') 
-  CATEGORY_NAMES: ('stationery', 'sink', 'table', 'floor mat', 'bottle', 'bookcase', 'bin', 'blinds', 'pillow', 'bicycle', 'refrigerator', 'night stand', 'chair', 'sofa', 'books', 'oven', 'towel', 'cabinet', 'window', 'curtain', 'bathtub', 'laptop', 'desk', 'television', 'clothes', 'stove', 'cup', 'shelves', 'box', 'shoes', 'mirror', 'door', 'picture', 'lamp', 'machine', 'counter', 'bed', 'toilet')
+  TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
+  TEST: ('nuScenes_test', 'ARKitScenes_test',) 
+  CATEGORY_NAMES: ('machine', 'shelves', 'chair', 'car', 'table', 'sofa', 'bus', 'cabinet', 'toilet', 'motorcycle', 'bathtub', 'oven', 'sink', 'traffic cone', 'truck', 'television', 'refrigerator', 'pedestrian', 'stove', 'bicycle', 'trailer', 'barrier', 'bed')
 
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)
@@ -11,11 +11,11 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 128
+  IMS_PER_BATCH: 256
   TYPE: "mmcv_AdamW"
-  BASE_LR: 8e-4
+  BASE_LR: 16e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 116000
+  MAX_ITER: 29000
   VIRTUAL_EPOCHS: 20
 
   LR_SCHEDULER_NAME: "CosineAnnealing"
@@ -29,7 +29,7 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 29000
+  EVAL_PERIOD: 7250
 
 MODEL:
   META_ARCHITECTURE: "OV_3D_Det"
@@ -54,6 +54,7 @@ MODEL:
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
+        TRAIN_GT_CENTER: True
         PROPOSAL_NUMBER: 100
         OBJ_LOSS_WEIGHT: 1.0
         DEPTH_LOSS_WEIGHT: 0.2
@@ -73,9 +74,9 @@ MODEL:
         ENC_NUM: 1
         DEC_NUM: 6
 
-        POSITION_RANGE: [-20, 20, -10, 15, 0, 20]
-        GRID_SIZE: [0.4, 25, 0.4]
-        D_BOUND: [0.1, 20, 0.2]
+        POSITION_RANGE: [-60, 60, -20, 35, 0, 80]
+        GRID_SIZE: [1, 55, 1]
+        D_BOUND: [0.1, 100, 1]
         ENC_CAM_INTRINSIC: True  #  Set to a value bigger than 0 means using virtual focal depth.
 
       POST_PROCESS:
