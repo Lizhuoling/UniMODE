@@ -50,12 +50,12 @@ MODEL:
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
       DOWNSAMPLE_FACTOR: 16
       LID: True
-      LLS_SPARSE: -1.0
+      LLS_SPARSE: 1e-3
       FEAT3D_FORM: "bev"  # "bev" or "voxel"
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
-        TRAIN_GT_CENTER: True
+        TRAIN_GT_CENTER: False
         PROPOSAL_NUMBER: 100
         OBJ_LOSS_WEIGHT: 1.0
         DEPTH_LOSS_WEIGHT: 0.2

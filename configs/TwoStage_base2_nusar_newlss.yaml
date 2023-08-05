@@ -55,7 +55,7 @@ MODEL:
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
-        TRAIN_GT_CENTER: True
+        TRAIN_GT_CENTER: False
         PROPOSAL_NUMBER: 100
         OBJ_LOSS_WEIGHT: 1.0
         DEPTH_LOSS_WEIGHT: 0.2

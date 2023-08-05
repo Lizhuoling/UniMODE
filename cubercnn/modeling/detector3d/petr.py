@@ -13,9 +13,10 @@ import torchvision
 
 from pytorch3d.transforms import rotation_6d_to_matrix
 from pytorch3d.transforms.so3 import so3_relative_angle
+import detectron2.utils.comm as comm
 from detectron2.structures import Instances, Boxes
-from mmcv.runner.base_module import BaseModule
 from detectron2.data import MetadataCatalog
+from mmcv.runner.base_module import BaseModule
 
 from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn import Conv2d, Linear, build_activation_layer, bias_init_with_prob
@@ -551,8 +552,7 @@ class PETR_HEAD(nn.Module):
 
         depth_and_feat = self.depthnet(feat, Ks)
         depth = depth_and_feat[:, :self.depth_channels].softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)
-        img_feat_with_depth = depth.unsqueeze(1) * depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)].unsqueeze(2)  # Left shape: (B, C, D, H, W)
-        img_feat_with_depth = img_feat_with_depth.permute(0, 2, 3, 4, 1)    # Left shape: (B, D, H, W, C)
+        cam_feat = depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)]  # Left shape: (B, C, H, W)
         geom_xyz = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy(), (img_mask.shape[2], img_mask.shape[1]))    # Left shape: (B, D, H, W, 3)
  
         if self.cfg.MODEL.DETECTOR3D.PETR.LID:
@@ -567,7 +567,14 @@ class PETR_HEAD(nn.Module):
             sparse_mask = depth < self.cfg.MODEL.DETECTOR3D.PETR.LLS_SPARSE # Left shape: (B, D, H, W)
             geom_xyz[sparse_mask.unsqueeze(-1).expand_as(geom_xyz)] = -1
         # Notably, the BEV feature shape should be (B, C bev_z, bev_x) rather than (B, C bev_y, bev_x).
-        bev_feat = voxel_pooling_train(geom_xyz.contiguous(), img_feat_with_depth.contiguous(), self.voxel_num.cuda())   # Left shape: (B, C, bev_z, bev_x)
+        voxel_feat = voxel_pooling_train(geom_xyz.contiguous(), cam_feat.contiguous(), depth.contiguous(), self.voxel_num.cuda())\
+            .permute(0, 4, 1, 2, 3).contiguous()   # Left shape: (B, C, bev_z, bev_y, bev_x)
+        if self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "bev":
+            bev_feat = voxel_feat.sum(3)    # Left shape: (B, C, bev_z, bev_x)
+        elif self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "voxel":
+            raise Exception("Voxel feature has not been supported.")
+        comm.synchronize()
+
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
         bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
         bev_feat_pos = self.bev_pos2d_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
