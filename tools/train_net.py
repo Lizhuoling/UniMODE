@@ -10,6 +10,7 @@ import copy
 from collections import OrderedDict
 import torch
 from torch.nn.parallel import DistributedDataParallel
+import torch.multiprocessing
 import torch.distributed as dist
 import detectron2.utils.comm as comm
 from detectron2.checkpoint import DetectionCheckpointer
@@ -28,6 +29,7 @@ from detectron2.utils.logger import setup_logger
 #torch.autograd.set_detect_anomaly(True)
 os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
 logger = logging.getLogger("cubercnn")
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 warnings.filterwarnings("ignore")
 
