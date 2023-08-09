@@ -13,7 +13,6 @@ import torchvision
 
 from pytorch3d.transforms import rotation_6d_to_matrix
 from pytorch3d.transforms.so3 import so3_relative_angle
-import detectron2.utils.comm as comm
 from detectron2.structures import Instances, Boxes
 from detectron2.data import MetadataCatalog
 from mmcv.runner.base_module import BaseModule
@@ -573,7 +572,6 @@ class PETR_HEAD(nn.Module):
             bev_feat = voxel_feat.sum(3)    # Left shape: (B, C, bev_z, bev_x)
         elif self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "voxel":
             raise Exception("Voxel feature has not been supported.")
-        comm.synchronize()
 
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
         bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)

@@ -29,7 +29,7 @@ from detectron2.utils.logger import setup_logger
 #torch.autograd.set_detect_anomaly(True)
 os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
 logger = logging.getLogger("cubercnn")
-torch.multiprocessing.set_sharing_strategy('file_system')
+#torch.multiprocessing.set_sharing_strategy('file_system')
 
 warnings.filterwarnings("ignore")
 
@@ -146,7 +146,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
     
     # create the dataloader
     data_mapper = DatasetMapper3D(cfg, is_train=True)
-    data_loader = build_detection_train_loader(cfg, mapper=data_mapper, dataset_id_to_src=dataset_id_to_src, num_workers = 8)
+    data_loader = build_detection_train_loader(cfg, mapper=data_mapper, dataset_id_to_src=dataset_id_to_src, num_workers = 4)
 
     # give the mapper access to dataset_ids
     data_mapper.dataset_id_to_unknown_cats = dataset_id_to_unknown_cats
