@@ -198,6 +198,7 @@ def get_cfg_defaults(cfg):
     # sgd, adam, adam+amsgrad, adamw, adamw+amsgrad
     cfg.SOLVER.TYPE = 'sgd'
     cfg.SOLVER.VIRTUAL_EPOCHS = 20
+    cfg.SOLVER.VIRTUAL_LOSS = 1.0
 
     cfg.MODEL.RESNETS.TORCHVISION = True
     cfg.TEST.DETECTIONS_PER_IMAGE = 100

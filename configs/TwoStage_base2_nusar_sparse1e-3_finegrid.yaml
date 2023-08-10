@@ -2,7 +2,9 @@ _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
   TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
+  #TRAIN: ('nuScenes_val', 'ARKitScenes_val')
   TEST: ('nuScenes_test', 'ARKitScenes_test',) 
+  #TEST: ('nuScenes_test',)
   CATEGORY_NAMES: ('machine', 'shelves', 'chair', 'car', 'table', 'sofa', 'bus', 'cabinet', 'toilet', 'motorcycle', 'bathtub', 'oven', 'sink', 'traffic cone', 'truck', 'television', 'refrigerator', 'pedestrian', 'stove', 'bicycle', 'trailer', 'barrier', 'bed')
 
 INPUT:
@@ -17,6 +19,7 @@ SOLVER:
   WEIGHT_DECAY: 1e-2
   MAX_ITER: 29000
   VIRTUAL_EPOCHS: 20
+  VIRTUAL_LOSS: 1.0   # To avoid the total loss is too small.
 
   LR_SCHEDULER_NAME: "CosineAnnealing"
   WARMUP_FACTOR: 0.3333

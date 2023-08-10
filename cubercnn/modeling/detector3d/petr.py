@@ -369,6 +369,12 @@ class PETR_HEAD(nn.Module):
             coor_z_index_1 = coor_z_index + 1
             coor_z_bin_size = (coor_z_end - coor_z_start) / (coor_z_num * (1 + coor_z_num))
             self.coor_z_coords = coor_z_start + coor_z_bin_size * coor_z_index * coor_z_index_1    # Left shape: (bev_z,)
+
+        assert len(cfg.INPUT.RESIZE_TGT_SIZE) == 2
+        img_shape_after_aug = cfg.INPUT.RESIZE_TGT_SIZE
+        assert img_shape_after_aug[0] % self.downsample_factor == 0 and img_shape_after_aug[1] % self.downsample_factor == 0
+        feat_shape = (img_shape_after_aug[0] // self.downsample_factor, img_shape_after_aug[1] // self.downsample_factor)
+        self.register_buffer('frustum', self.create_frustum(cfg.INPUT.RESIZE_TGT_SIZE, feat_shape))
         
         self.depth_channels = math.ceil((self.d_bound[1] - self.d_bound[0]) / self.d_bound[2])
         
@@ -519,7 +525,8 @@ class PETR_HEAD(nn.Module):
 
     @torch.no_grad()
     def get_geometry(self, Ks, B, img_shape_after_aug, feat_shape):
-        points = self.create_frustum(img_shape_after_aug, feat_shape)[None].expand(B, -1, -1, -1, -1).cuda()   # Left shape: (B, D, H, W, 3)
+        #points = self.create_frustum(img_shape_after_aug, feat_shape)[None].expand(B, -1, -1, -1, -1).cuda()   # Left shape: (B, D, H, W, 3)
+        points = self.frustum[None].expand(B, -1, -1, -1, -1)   # Left shape: (B, D, H, W, 3)
         
         points = torch.cat((points[..., :2] * points[..., 2:], points[..., 2:]), dim = -1)  # Left shape: (B, D, H, W, 3)
         points = points.unsqueeze(-1)  # Left shape: (1, D, H, W, 3, 1)

@@ -178,7 +178,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
     
     # when loss > recent_loss * TOLERANCE, then it could be a
     # diverging/failing model, which we should skip all updates for.
-    #TOLERANCE = 4.0         
+    TOLERANCE = 4.0         
 
     GAMMA = 0.02            # rolling average weight gain
     recent_loss = None      # stores the most recent loss magnitude
@@ -202,7 +202,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
 
             # reduce
             loss_dict_reduced = {k: v.item() for k, v in allreduce_dict(loss_dict).items()}
-            losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+            losses_reduced = sum(loss for loss in loss_dict_reduced.values()) + cfg.SOLVER.VIRTUAL_LOSS # Add virtual loss to avoid the total loss is too small.
         
             # sync up
             comm.synchronize()
@@ -213,11 +213,11 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
                 recent_loss = losses_reduced*2.0
 
             # Is stabilization enabled, and loss high or NaN?
-            #diverging_model = cfg.MODEL.STABILIZE > 0 and \
-            #            (losses_reduced > recent_loss*TOLERANCE or \
-            #                not (np.isfinite(losses_reduced)) or np.isnan(losses_reduced))
             diverging_model = cfg.MODEL.STABILIZE > 0 and \
-                (not (np.isfinite(losses_reduced)) or np.isnan(losses_reduced))
+                        (losses_reduced > recent_loss*TOLERANCE or \
+                            not (np.isfinite(losses_reduced)) or np.isnan(losses_reduced))
+            #diverging_model = cfg.MODEL.STABILIZE > 0 and \
+            #    (not (np.isfinite(losses_reduced)) or np.isnan(losses_reduced))
 
             if diverging_model:
                 # clip and warn the user.
