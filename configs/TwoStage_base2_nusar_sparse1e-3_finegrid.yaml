@@ -79,7 +79,7 @@ MODEL:
         DEC_NUM: 6
 
         POSITION_RANGE: [-60, 60, -20, 35, 0, 80]
-        GRID_SIZE: [0.4, 55, 0.4]
+        GRID_SIZE: [0.8, 55, 0.8]
         D_BOUND: [0.1, 100, 1.0]
         ENC_CAM_INTRINSIC: True  #  Set to a value bigger than 0 means using virtual focal depth.
 

@@ -49,7 +49,6 @@ class VoxelPoolingTrain(Function):
         output_features = input_features.new_zeros(batch_size, voxel_num[2], voxel_num[1], voxel_num[0], num_channels)
         
         # Save the position of bev_feature_map for each input point.
-        pos_memo = geom_xyz.new_ones(batch_size, num_points, 3) * -1
         voxel_pooling_train_ext.voxel_pooling_train_forward_wrapper(
             batch_size,
             num_points,
@@ -63,10 +62,9 @@ class VoxelPoolingTrain(Function):
             input_features,
             depth,
             output_features,
-            pos_memo,
         )
-        # save grad_input_features and pos_memo for backward
-        ctx.save_for_backward(grad_input_features, grad_depth, input_features.detach(), depth.detach(), pos_memo, voxel_num)
+        # save for backward
+        ctx.save_for_backward(grad_input_features, grad_depth, input_features.detach(), depth.detach(), geom_xyz, voxel_num)
         
         return output_features   # Left shape: (B, voxel_z, voxel_y, voxel_x, C)
 
@@ -76,10 +74,10 @@ class VoxelPoolingTrain(Function):
         if not grad_output_features.is_contiguous():
             grad_output_features = grad_output_features.contiguous()
 
-        (grad_input_features, grad_depth, input_features, depth, pos_memo, voxel_num) = ctx.saved_tensors
+        (grad_input_features, grad_depth, input_features, depth, geom_xyz, voxel_num) = ctx.saved_tensors
 
         batch_size = input_features.shape[0]    # input_features shape: (B, C, H*W)
-        num_points = pos_memo.shape[1]  # pos_memo shape: (B, D*H*W, 3)
+        num_points = geom_xyz.shape[1]  # geom_xyz shape: (B, D*H*W, 3)
         num_features = input_features.shape[2]
         num_channels = input_features.shape[1]
         num_depth = depth.shape[1]  # depth shape: (B, D, H, W)
@@ -93,7 +91,7 @@ class VoxelPoolingTrain(Function):
             voxel_num[1],
             voxel_num[2],
             num_depth,
-            pos_memo,
+            geom_xyz,
             input_features,
             depth,
             grad_input_features,

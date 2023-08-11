@@ -10,7 +10,7 @@ template <typename T>
 __global__ void voxel_pooling_train_forward_kernel(
     int batch_size, int num_points, int num_features, int num_channels, 
     int num_voxel_x, int num_voxel_y, int num_voxel_z, int num_depth, 
-    const int *geom_xyz, const T *input_features, const T *depth, T *output_features, int *pos_memo) 
+    const int *geom_xyz, const T *input_features, const T *depth, T *output_features) 
 {
 
   const int blk_idx = blockIdx.x;
@@ -35,9 +35,6 @@ __global__ void voxel_pooling_train_forward_kernel(
     if (x < 0 || x >= num_voxel_x || y < 0 || y >= num_voxel_y || z < 0 || z >= num_voxel_z) {
       return;
     }
-    pos_memo[pt_idx * 3] = z;
-    pos_memo[pt_idx * 3 + 1] = y;
-    pos_memo[pt_idx * 3 + 2] = x;
 
     const int grid_id = batch_idx * num_voxel_z * num_voxel_y * num_voxel_x + z * num_voxel_y * num_voxel_x + y * num_voxel_x + x;
 
@@ -54,7 +51,7 @@ __global__ void voxel_pooling_train_forward_kernel(
 __global__ void  voxel_pooling_train_backward_kernel(
     int batch_size, int num_points, int num_features, int num_channels, 
     int num_voxel_x, int num_voxel_y, int num_voxel_z, int num_depth,
-    const int *pos_memo, const float *input_features, const float *depth, float *grad_input_features, float *grad_depth, const float *grad_output_features)
+    const int *geom_xyz, const float *input_features, const float *depth, float *grad_input_features, float *grad_depth, const float *grad_output_features)
 {
   // Each thread process only one channel of one voxel.
   int blk_idx = blockIdx.x;
@@ -71,11 +68,11 @@ __global__ void  voxel_pooling_train_backward_kernel(
     const int depth_idx = tmp_idx / num_features; // The D idx
     const int feature_idx = tmp_idx % num_features; // The HW idx
 
-    const int z = pos_memo[pt_idx * 3];
-    const int y = pos_memo[pt_idx * 3 + 1];
-    const int x = pos_memo[pt_idx * 3 + 2];
+    const int x = geom_xyz[pt_idx * 3];
+    const int y = geom_xyz[pt_idx * 3 + 1];
+    const int z = geom_xyz[pt_idx * 3 + 2];
     // if point is not used, return.
-    if (z == -1) {
+    if (x < 0 || x >= num_voxel_x || y < 0 || y >= num_voxel_y || z < 0 || z >= num_voxel_z) {
       return;
     }
 
@@ -99,7 +96,7 @@ __global__ void  voxel_pooling_train_backward_kernel(
 void voxel_pooling_train_forward_kernel_launcher(
     int batch_size, int num_points, int num_features, int num_channels, 
     int num_voxel_x, int num_voxel_y, int num_voxel_z, int num_depth,
-    const int *geom_xyz, const float *input_features, const float *depth, float *output_features, int *pos_memo,
+    const int *geom_xyz, const float *input_features, const float *depth, float *output_features,
     cudaStream_t stream) {
   cudaError_t err;
 
@@ -108,7 +105,7 @@ void voxel_pooling_train_forward_kernel_launcher(
 
   voxel_pooling_train_forward_kernel<<<blocks, threads, 0, stream>>>(
       batch_size, num_points, num_features, num_channels, num_voxel_x, num_voxel_y,
-      num_voxel_z, num_depth, geom_xyz, input_features, depth, output_features, pos_memo);
+      num_voxel_z, num_depth, geom_xyz, input_features, depth, output_features);
   err = cudaGetLastError();
   if (cudaSuccess != err) {
     fprintf(stderr, "CUDA kernel failed : %s\n", cudaGetErrorString(err));
@@ -119,7 +116,7 @@ void voxel_pooling_train_forward_kernel_launcher(
 void voxel_pooling_train_backward_kernel_launcher(
     int batch_size, int num_points, int num_features, int num_channels, 
     int num_voxel_x, int num_voxel_y, int num_voxel_z, int num_depth,
-    const int *pos_memo, const float *input_features, const float *depth, float *grad_input_features, float *grad_depth, const float *grad_output_features,
+    const int *geom_xyz, const float *input_features, const float *depth, float *grad_input_features, float *grad_depth, const float *grad_output_features,
     cudaStream_t stream){
   cudaError_t err;
 
@@ -128,7 +125,7 @@ void voxel_pooling_train_backward_kernel_launcher(
 
   voxel_pooling_train_backward_kernel<<<blocks, threads, 0, stream>>>(
       batch_size, num_points, num_features, num_channels, num_voxel_x, num_voxel_y,
-      num_voxel_z, num_depth, pos_memo, input_features, depth, grad_input_features, grad_depth, grad_output_features);
+      num_voxel_z, num_depth, geom_xyz, input_features, depth, grad_input_features, grad_depth, grad_output_features);
   err = cudaGetLastError();
   if (cudaSuccess != err) {
     fprintf(stderr, "CUDA kernel failed : %s\n", cudaGetErrorString(err));

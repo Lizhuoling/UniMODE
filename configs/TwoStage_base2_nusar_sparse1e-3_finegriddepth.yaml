@@ -17,6 +17,7 @@ SOLVER:
   WEIGHT_DECAY: 1e-2
   MAX_ITER: 29000
   VIRTUAL_EPOCHS: 20
+  VIRTUAL_LOSS: 1.0   # To avoid the total loss is too small.
 
   LR_SCHEDULER_NAME: "CosineAnnealing"
   WARMUP_FACTOR: 0.3333
@@ -76,7 +77,7 @@ MODEL:
         DEC_NUM: 6
 
         POSITION_RANGE: [-60, 60, -20, 35, 0, 80]
-        GRID_SIZE: [0.4, 55, 0.4]
+        GRID_SIZE: [0.8, 55, 0.8]
         D_BOUND: [0.1, 100, 0.5]
         ENC_CAM_INTRINSIC: True  #  Set to a value bigger than 0 means using virtual focal depth.
 
