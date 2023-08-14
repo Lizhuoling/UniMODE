@@ -27,66 +27,27 @@ class CENTER_HEAD(nn.Module):
         self.depth_loss_weight = cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.DEPTH_LOSS_WEIGHT
         self.offset_loss_weight = cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.OFFSET_LOSS_WEIGHT
 
-        # Predict the confidence that concerned objects exist. It works like RPN.
+        self.shared_conv = nn.Sequential(
+            nn.Conv2d(in_channels, self.embed_dims, kernel_size=1, padding=1 // 2, bias=True),
+            BasicBlock(self.embed_dims, self.embed_dims),
+        )
         if cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.BIG_CENTER_HEAD:
-            self.obj_head = nn.Sequential(
-                nn.Conv2d(in_channels, self.embed_dims, kernel_size=1, padding=1 // 2, bias=True),
-                BasicBlock(self.embed_dims, self.embed_dims),
-                ASPP(self.embed_dims, self.embed_dims),
+            self.shared_conv.add_module('ASPP', ASPP(self.embed_dims, self.embed_dims))
+            self.shared_conv.add_module('DCN', 
                 build_conv_layer(cfg=dict(type='DCN',
                     in_channels=self.embed_dims,
                     out_channels=self.embed_dims,
                     kernel_size=3,
                     padding=1,
                     im2col_step=128,
-                )),
-                nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True),
+                ))
             )
-            self.depth_head = nn.Sequential(
-                nn.Conv2d(in_channels, self.embed_dims, kernel_size=1, padding=1 // 2, bias=True),
-                BasicBlock(self.embed_dims, self.embed_dims),
-                ASPP(self.embed_dims, self.embed_dims),
-                build_conv_layer(cfg=dict(type='DCN',
-                    in_channels=self.embed_dims,
-                    out_channels=self.embed_dims,
-                    kernel_size=3,
-                    padding=1,
-                    im2col_step=128,
-                )),
-                nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True),
-            )
-            self.offset_head = nn.Sequential(
-                nn.Conv2d(in_channels, self.embed_dims, kernel_size=1, padding=1 // 2, bias=True),
-                BasicBlock(self.embed_dims, self.embed_dims),
-                ASPP(self.embed_dims, self.embed_dims),
-                build_conv_layer(cfg=dict(type='DCN',
-                    in_channels=self.embed_dims,
-                    out_channels=self.embed_dims,
-                    kernel_size=3,
-                    padding=1,
-                    im2col_step=128,
-                )),
-                nn.Conv2d(self.embed_dims, 2, kernel_size=1, padding=1 // 2, bias=True),
-            )
-        else:
-            self.obj_head = nn.Sequential(
-                nn.Conv2d(in_channels, self.embed_dims, kernel_size=3, padding=1, bias=False),
-                nn.BatchNorm2d(self.embed_dims, momentum=0.1), 
-                nn.ReLU(inplace=True),
-                nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True),
-            )
-            self.depth_head = nn.Sequential(
-                nn.Conv2d(in_channels, self.embed_dims, kernel_size=3, padding=1, bias=False),
-                nn.BatchNorm2d(self.embed_dims, momentum=0.1), 
-                nn.ReLU(inplace=True),
-                nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=0, bias=True)
-            )
-            self.offset_head = nn.Sequential(
-                nn.Conv2d(in_channels, self.embed_dims, kernel_size=3, padding=1, bias=False),
-                nn.BatchNorm2d(self.embed_dims, momentum=0.1), 
-                nn.ReLU(inplace=True),
-                nn.Conv2d(self.embed_dims, 2, kernel_size=1, padding=0, bias=True)
-            )
+
+        self.obj_head = nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True)
+
+        self.depth_head = nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=0, bias=True)
+
+        self.offset_head = nn.Conv2d(self.embed_dims, 2, kernel_size=1, padding=0, bias=True)
 
         self.cls_loss_fnc = FocalLoss(2, 4)
 
@@ -94,12 +55,18 @@ class CENTER_HEAD(nn.Module):
 
     def init_weights(self):
         INIT_P = 0.01
-        self.obj_head[-1].bias.data.fill_(- np.log(1 / INIT_P - 1))
+        self.obj_head.bias.data.fill_(- np.log(1 / INIT_P - 1))
     
     def forward(self, feat, Ks, batched_inputs):
+        feat = self.shared_conv(feat)
+        
         obj_pred = sigmoid_hm(self.obj_head(feat))  # Left shape: (B, 1, feat_h, feat_w)
         depth_pred = self.depth_head(feat)  # Left shape: (B, 1, feat_h, feat_w)
         depth_pred = 1 / depth_pred.sigmoid() - 1   # inv_sigmoid decoding
+        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.FOCAL_DECOUPLE:
+            virtual_focal_y = self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.VIRTUAL_FOCAL_Y
+            real_focal_y = Ks[:, 1, 1]
+            depth_pred = depth_pred * real_focal_y[:, None, None, None] / virtual_focal_y
         offset_pred = self.offset_head(feat)    # Left shape: (B, 2, feat_h, feat_w)
 
         bs, _, feat_h, feat_w = obj_pred.shape

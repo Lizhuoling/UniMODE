@@ -16,7 +16,7 @@ class VoxelPoolingTrain(Function):
 
         Args:
             geom_xyz (Tensor): xyz coord for each voxel with the shape
-                of [B, D, H, W, 3].
+                of [num_proj, 6], where the first 3 numbers are bev x, y, z. The remaning 3 numbers are b, d, hw.
             input_features (Tensor): feature for each voxel with the
                 shape of [B, C, H, W].
             depth shape: (B, D, H, W)
@@ -24,7 +24,7 @@ class VoxelPoolingTrain(Function):
                 shape of [3], (voxel_x, voxel_y, voxel_z).
 
         Returns:
-            Tensor: (B, C, bev_z, bev_x) bev feature map.
+            Tensor: (B, C, bev_z, bev_y, bev_x) voxel feature.
         """
         assert geom_xyz.is_contiguous()
         assert input_features.is_contiguous()
@@ -37,27 +37,22 @@ class VoxelPoolingTrain(Function):
         grad_depth = torch.zeros_like(depth)
 
         batch_size = input_features.shape[0]
+        num_proj = geom_xyz.shape[0]
+        num_features = input_features.shape[2] * input_features.shape[3]  # H * W
         num_channels = input_features.shape[1]
-
-        geom_xyz = geom_xyz.reshape(geom_xyz.shape[0], -1, geom_xyz.shape[-1]).contiguous()  # Left shape: (B, D * H * W, 3)
-        input_features = input_features.reshape(batch_size, num_channels, -1).contiguous()  # Left shape: (B, C, H * W)
-
-        num_points = geom_xyz.shape[1]  # D * H * W
-        num_features = input_features.shape[2]  # H * W
         num_depth = depth.shape[1]  # D
 
-        output_features = input_features.new_zeros(batch_size, voxel_num[2], voxel_num[1], voxel_num[0], num_channels)
+        output_features = input_features.new_zeros(batch_size, voxel_num[2], voxel_num[1], voxel_num[0], num_channels)  # Left shape: (B, voxel_z, voxel_y, voxel_x, C)
         
         # Save the position of bev_feature_map for each input point.
         voxel_pooling_train_ext.voxel_pooling_train_forward_wrapper(
-            batch_size,
-            num_points,
+            num_proj,
             num_features,
             num_channels,
+            num_depth,
             voxel_num[0],
             voxel_num[1],
             voxel_num[2],
-            num_depth,
             geom_xyz,
             input_features,
             depth,
@@ -76,21 +71,19 @@ class VoxelPoolingTrain(Function):
 
         (grad_input_features, grad_depth, input_features, depth, geom_xyz, voxel_num) = ctx.saved_tensors
 
-        batch_size = input_features.shape[0]    # input_features shape: (B, C, H*W)
-        num_points = geom_xyz.shape[1]  # geom_xyz shape: (B, D*H*W, 3)
-        num_features = input_features.shape[2]
+        num_proj = geom_xyz.shape[0]
+        num_features = input_features.shape[2] * input_features.shape[3]  # H * W
         num_channels = input_features.shape[1]
-        num_depth = depth.shape[1]  # depth shape: (B, D, H, W)
+        num_depth = depth.shape[1]  # D
         
         voxel_pooling_train_ext.voxel_pooling_train_backward_wrapper(
-            batch_size,
-            num_points,
+            num_proj,
             num_features,
             num_channels,
-            voxel_num[0],
-            voxel_num[1],
-            voxel_num[2],
             num_depth,
+            voxel_num[0].item(),
+            voxel_num[1].item(),
+            voxel_num[2].item(),
             geom_xyz,
             input_features,
             depth,

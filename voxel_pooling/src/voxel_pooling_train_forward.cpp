@@ -14,15 +14,13 @@
   CHECK_CUDA(x);       \
   CHECK_CONTIGUOUS(x)
 
-int voxel_pooling_train_forward_wrapper(int batch_size, int num_points, int num_features, int num_channels, 
-                                        int num_voxel_x, int num_voxel_y, int num_voxel_z, int num_depth,
+int voxel_pooling_train_forward_wrapper(int num_proj, int num_features, int num_channels, int num_depth, int num_voxel_x, int num_voxel_y, int num_voxel_z,
                                         at::Tensor geom_xyz_tensor,
                                         at::Tensor input_features_tensor,
                                         at::Tensor depth_tensor,
                                         at::Tensor output_features_tensor);
 
-int voxel_pooling_train_backward_wrapper(int batch_size, int num_points, int num_features, int num_channels, 
-                                        int num_voxel_x, int num_voxel_y, int num_voxel_z, int num_depth,
+int voxel_pooling_train_backward_wrapper(int num_proj, int num_features, int num_channels, int num_depth, int num_voxel_x, int num_voxel_y, int num_voxel_z,
                                         at::Tensor geom_xyz_tensor,
                                         at::Tensor input_features_tensor,
                                         at::Tensor depth_tensor,
@@ -31,19 +29,16 @@ int voxel_pooling_train_backward_wrapper(int batch_size, int num_points, int num
                                         at::Tensor grad_output_features_tensor);
 
 void voxel_pooling_train_forward_kernel_launcher(
-    int batch_size, int num_points, int num_features, int num_channels, 
-    int num_voxel_x, int num_voxel_y, int num_voxel_z, int num_depth,
+    int num_proj, int num_features, int num_channels, int num_depth, int num_voxel_x, int num_voxel_y, int num_voxel_z,
     const int *geom_xyz, const float *input_features, const float *depth, float *output_features,
     cudaStream_t stream);
 
 void voxel_pooling_train_backward_kernel_launcher(
-    int batch_size, int num_points, int num_features, int num_channels, 
-    int num_voxel_x, int num_voxel_y, int num_voxel_z, int num_depth,
+    int num_proj, int num_features, int num_channels, int num_depth, int num_voxel_x, int num_voxel_y, int num_voxel_z,
     const int *geom_xyz, const float *input_features, const float *depth, float *grad_input_features, float *grad_depth, const float *grad_output_features,
     cudaStream_t stream);
 
-int voxel_pooling_train_forward_wrapper(int batch_size, int num_points, int num_features, int num_channels, 
-                                        int num_voxel_x, int num_voxel_y, int num_voxel_z, int num_depth,
+int voxel_pooling_train_forward_wrapper(int num_proj, int num_features, int num_channels, int num_depth, int num_voxel_x, int num_voxel_y, int num_voxel_z,
                                         at::Tensor geom_xyz_tensor,
                                         at::Tensor input_features_tensor,
                                         at::Tensor depth_tensor,
@@ -52,23 +47,20 @@ int voxel_pooling_train_forward_wrapper(int batch_size, int num_points, int num_
   CHECK_INPUT(input_features_tensor);
   CHECK_INPUT(depth_tensor);
   CHECK_INPUT(output_features_tensor);
-  const int *geom_xyz = geom_xyz_tensor.data_ptr<int>();
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
 
+  const int *geom_xyz = geom_xyz_tensor.data_ptr<int>();
   const float *input_features = input_features_tensor.data_ptr<float>();
   const float *depth = depth_tensor.data_ptr<float>();
   float *output_features = output_features_tensor.data_ptr<float>();
   voxel_pooling_train_forward_kernel_launcher(
-      batch_size, num_points, num_features, num_channels, num_voxel_x, num_voxel_y,
-      num_voxel_z, num_depth, geom_xyz, input_features, depth, output_features,
-      stream);
+      num_proj, num_features, num_channels, num_depth, num_voxel_x, num_voxel_y, num_voxel_z, geom_xyz, input_features, depth, output_features, stream);
 
   return 1;
 }
 
-int voxel_pooling_train_backward_wrapper(int batch_size, int num_points, int num_features, int num_channels, 
-                                        int num_voxel_x, int num_voxel_y, int num_voxel_z, int num_depth,
+int voxel_pooling_train_backward_wrapper(int num_proj, int num_features, int num_channels, int num_depth, int num_voxel_x, int num_voxel_y, int num_voxel_z,
                                         at::Tensor geom_xyz_tensor,
                                         at::Tensor input_features_tensor,
                                         at::Tensor depth_tensor,
@@ -90,7 +82,7 @@ int voxel_pooling_train_backward_wrapper(int batch_size, int num_points, int num
   const float *grad_output_features = grad_output_features_tensor.data_ptr<float>();
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
-  voxel_pooling_train_backward_kernel_launcher(batch_size, num_points, num_features, num_channels, num_voxel_x, num_voxel_y, num_voxel_z, num_depth, 
+  voxel_pooling_train_backward_kernel_launcher(num_proj, num_features, num_channels, num_depth, num_voxel_x, num_voxel_y, num_voxel_z,
         geom_xyz, input_features, depth, grad_input_features, grad_depth, grad_output_features, stream);
   return 1;
 }

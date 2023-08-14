@@ -232,7 +232,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
             if comm.is_main_process():
                 # send loss scalars to tensorboard.
                 storage.put_scalars(total_loss=losses_reduced, **loss_dict_reduced)
-        
+            
             # backward and step
             optimizer.zero_grad()
             losses.backward()

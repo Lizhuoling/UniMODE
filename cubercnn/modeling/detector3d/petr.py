@@ -568,12 +568,24 @@ class PETR_HEAD(nn.Module):
             geom_xyz = torch.cat((geom_xy, geom_z), dim = -1).int()   # Left shape: (B, D, H, W, 3)
         else:
             geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
-        geom_xyz[img_mask[:, None, :, :, None].expand_as(geom_xyz)] = -1   # Block feature from invalid image region.
+        B, D, H, W, _ = geom_xyz.shape
+        B_idx = torch.arange(start = 0, end = B, device = geom_xyz.device)
+        D_idx = torch.arange(start = 0, end = D, device = geom_xyz.device)
+        H_idx = torch.arange(start = 0, end = H, device = geom_xyz.device)
+        W_idx = torch.arange(start = 0, end = W, device = geom_xyz.device)
+        B_idx, D_idx, H_idx, W_idx = torch.meshgrid(B_idx, D_idx, H_idx, W_idx)
+        HW_idx = H_idx * W + W_idx
+        BDHW_idx = torch.stack((B_idx, D_idx, HW_idx), dim = -1)    # Left shape: (B, D, H, W, 3)
+        geom_xyz = torch.cat((geom_xyz, BDHW_idx), dim = -1)    # Left shape: (B, D, H, W, 6). The first 3 numbers are voxel x, y, z. The remaning 3 numbers are b, d, hw.
+        outrange_mask = (geom_xyz[..., 0] < 0) | (geom_xyz[..., 0] >= self.voxel_num[0]) | (geom_xyz[..., 1] < 0) | (geom_xyz[..., 1] >= self.voxel_num[1]) | (geom_xyz[..., 2] < 0) | (geom_xyz[..., 2] >= self.voxel_num[2])
+        invalid_mask = img_mask.unsqueeze(1) | outrange_mask
         if self.cfg.MODEL.DETECTOR3D.PETR.LLS_SPARSE > 0:
-            sparse_mask = depth < self.cfg.MODEL.DETECTOR3D.PETR.LLS_SPARSE # Left shape: (B, D, H, W)
-            geom_xyz[sparse_mask.unsqueeze(-1).expand_as(geom_xyz)] = -1
+            invalid_mask = invalid_mask | (depth < self.cfg.MODEL.DETECTOR3D.PETR.LLS_SPARSE) # Left shape: (B, D, H, W)
+        valid_mask = ~invalid_mask
+        geom_xyz = geom_xyz[valid_mask]    # Left shape: (num_proj, 6)
+
         # Notably, the BEV feature shape should be (B, C bev_z, bev_x) rather than (B, C bev_y, bev_x).
-        voxel_feat = voxel_pooling_train(geom_xyz.contiguous(), cam_feat.contiguous(), depth.contiguous(), self.voxel_num.cuda())\
+        voxel_feat = voxel_pooling_train(geom_xyz.int().contiguous(), cam_feat.contiguous(), depth.contiguous(), self.voxel_num)\
             .permute(0, 4, 1, 2, 3).contiguous()   # Left shape: (B, C, bev_z, bev_y, bev_x)
         if self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "bev":
             bev_feat = voxel_feat.sum(3)    # Left shape: (B, C, bev_z, bev_x)
@@ -583,7 +595,7 @@ class PETR_HEAD(nn.Module):
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
         bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
         bev_feat_pos = self.bev_pos2d_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
-
+        
         # For vis
         '''depth_map = depth[0].argmax(0).cpu().numpy()
         plt.imshow(depth_map, cmap = 'magma_r')

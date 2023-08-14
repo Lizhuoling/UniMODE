@@ -180,6 +180,7 @@ maskrcnn_benchmark/utils/stats.py
 tools/__init__.py
 tools/train_net.py
 voxel_pooling/__init__.py
+voxel_pooling/demo.py
 voxel_pooling/voxel_pooling_train.py
 voxel_pooling/src/voxel_pooling_train_forward.cpp
 voxel_pooling/src/voxel_pooling_train_forward_cuda.cu
