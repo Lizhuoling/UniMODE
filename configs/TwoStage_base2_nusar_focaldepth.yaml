@@ -59,8 +59,8 @@ MODEL:
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
         TRAIN_GT_CENTER: False
-        BIG_CENTER_HEAD: True
-        FOCAL_DECOUPLE: False
+        FOCAL_DECOUPLE: True
+        VIRTUAL_FOCAL_Y: 512.0
         PROPOSAL_NUMBER: 100
         OBJ_LOSS_WEIGHT: 1.0
         DEPTH_LOSS_WEIGHT: 0.2
@@ -83,7 +83,7 @@ MODEL:
         POSITION_RANGE: [-60, 60, -20, 35, 0, 80]
         GRID_SIZE: [1, 55, 1]
         D_BOUND: [0.1, 100, 1]
-        ENC_CAM_INTRINSIC: True  #  Set to a value bigger than 0 means using virtual focal depth.
+        ENC_CAM_INTRINSIC: True 
 
       POST_PROCESS:
         CONFIDENCE_2D_THRE: 0.0

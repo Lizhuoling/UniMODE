@@ -1,4 +1,4 @@
-exp_id=TwoStage_base3_nusar_focaldepth
+exp_id=TwoStage_base2_nusar_focaldepth
 
 ulimit -n 1024000
 

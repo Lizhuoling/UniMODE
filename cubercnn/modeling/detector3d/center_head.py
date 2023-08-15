@@ -31,17 +31,6 @@ class CENTER_HEAD(nn.Module):
             nn.Conv2d(in_channels, self.embed_dims, kernel_size=1, padding=1 // 2, bias=True),
             BasicBlock(self.embed_dims, self.embed_dims),
         )
-        if cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.BIG_CENTER_HEAD:
-            self.shared_conv.add_module('ASPP', ASPP(self.embed_dims, self.embed_dims))
-            self.shared_conv.add_module('DCN', 
-                build_conv_layer(cfg=dict(type='DCN',
-                    in_channels=self.embed_dims,
-                    out_channels=self.embed_dims,
-                    kernel_size=3,
-                    padding=1,
-                    im2col_step=128,
-                ))
-            )
 
         self.obj_head = nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True)
 
