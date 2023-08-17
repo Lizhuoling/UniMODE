@@ -298,7 +298,7 @@ def transformer_cfgs(transformer_name, cfg):
             num_encoder_layers = cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_NUM,
             num_decoder_layers = cfg.MODEL.DETECTOR3D.PETR.HEAD.DEC_NUM,
             dim_feedforward = 512,
-            dropout = 0.1,
+            dropout = cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_DROPOUT,
             activation = "relu",
             return_intermediate_dec=True,
             num_feature_levels=1,   # Sample on the BEV feature.
@@ -354,7 +354,7 @@ class PETR_HEAD(nn.Module):
         self.register_buffer('voxel_coord', torch.Tensor([row[0] + row[2] / 2.0 for row in [self.x_bound, self.y_bound, self.z_bound]]))
         self.register_buffer('voxel_num', torch.LongTensor([(row[1] - row[0]) / row[2]for row in [self.x_bound, self.y_bound, self.z_bound]]))
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.LID:
+        if self.cfg.MODEL.DETECTOR3D.PETR.LID_DEPTH:
             depth_start, depth_end, depth_interval = self.d_bound
             depth_num = math.ceil((depth_end - depth_start) / depth_interval)
             index  = torch.arange(start=0, end=depth_num, step=1).float()
@@ -362,6 +362,7 @@ class PETR_HEAD(nn.Module):
             bin_size = (depth_end - depth_start) / (depth_num * (1 + depth_num))
             self.d_coords = depth_start + bin_size * index * index_1    # Left shape: (D,)
 
+        if self.cfg.MODEL.DETECTOR3D.PETR.LID:
             coor_z_start, coor_z_end, coor_z_interval =  self.position_range[4], self.position_range[5], cfg.MODEL.DETECTOR3D.PETR.HEAD.GRID_SIZE[2]
             coor_z_num = math.ceil((coor_z_end - coor_z_start) / coor_z_interval)
             self.coor_z_num = coor_z_num
@@ -512,7 +513,7 @@ class PETR_HEAD(nn.Module):
     def create_frustum(self, img_shape_after_aug, feat_shape):
         ogfW, ogfH = img_shape_after_aug
         fW, fH = feat_shape
-        if self.cfg.MODEL.DETECTOR3D.PETR.LID:
+        if self.cfg.MODEL.DETECTOR3D.PETR.LID_DEPTH:
             d_coords = self.d_coords.view(-1, 1, 1).expand(-1, fH, fW) # Left shape: (D, H, W)
         else:
             d_coords = torch.arange(*self.d_bound, dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # Left shape: (D, H, W)

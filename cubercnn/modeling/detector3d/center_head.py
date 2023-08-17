@@ -32,11 +32,20 @@ class CENTER_HEAD(nn.Module):
             BasicBlock(self.embed_dims, self.embed_dims),
         )
 
-        self.obj_head = nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True)
+        self.obj_head = nn.Sequential(
+            BasicBlock(self.embed_dims, self.embed_dims),
+            nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True),
+        )
 
-        self.depth_head = nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=0, bias=True)
+        self.depth_head = nn.Sequential(
+            BasicBlock(self.embed_dims, self.embed_dims),
+            nn.Conv2d(self.embed_dims, 1, kernel_size=1, padding=1 // 2, bias=True),
+        )
 
-        self.offset_head = nn.Conv2d(self.embed_dims, 2, kernel_size=1, padding=0, bias=True)
+        self.offset_head = nn.Sequential(
+            BasicBlock(self.embed_dims, self.embed_dims),
+            nn.Conv2d(self.embed_dims, 2, kernel_size=1, padding=1 // 2, bias=True),
+        )
 
         self.cls_loss_fnc = FocalLoss(2, 4)
 
@@ -44,7 +53,7 @@ class CENTER_HEAD(nn.Module):
 
     def init_weights(self):
         INIT_P = 0.01
-        self.obj_head.bias.data.fill_(- np.log(1 / INIT_P - 1))
+        self.obj_head[-1].bias.data.fill_(- np.log(1 / INIT_P - 1))
     
     def forward(self, feat, Ks, batched_inputs):
         feat = self.shared_conv(feat)
