@@ -5,6 +5,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 # ------------------------------------------------------------------------
 import math
+import pdb
 
 import torch
 import torch.nn as nn
@@ -96,7 +97,8 @@ class SinePositionalEncoding3D(BaseModule):
         pos_y = torch.stack(
             (pos_y[:, :, :, :, 0::2].sin(), pos_y[:, :, :, :, 1::2].cos()),
             dim=4).view(B, N, H, W, -1)
-        pos = torch.cat((pos_n, pos_y, pos_x), dim=4).permute(0, 1, 4, 2, 3)
+        #pos = torch.cat((pos_n, pos_y, pos_x), dim=4).permute(0, 1, 4, 2, 3)
+        pos = torch.cat((pos_n, pos_y, pos_x), dim=4)
         return pos
 
     def __repr__(self):

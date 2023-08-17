@@ -25,7 +25,6 @@ from mmdet.models import build_neck as mmdet_build_neck
 from mmdet3d.models import build_neck as mmdet3d_build_neck
 from mmdet.models.utils import build_transformer
 from mmdet.models.utils.transformer import inverse_sigmoid
-from mmcv.cnn.bricks.transformer import build_positional_encoding
 from mmdet.core import build_assigner, build_sampler, multi_apply, reduce_mean
 from mmdet.models import build_loss
 
@@ -36,6 +35,7 @@ from cubercnn.util import torch_dist
 from cubercnn import util as cubercnn_util
 from cubercnn.modeling.detector3d.detr_transformer import build_detr_transformer
 from cubercnn.modeling.detector3d.deformable_detr import build_deformable_transformer
+from cubercnn.modeling.detector3d.point3d_transformer import build_point3d_transformer
 from cubercnn.util.util import box_cxcywh_to_xyxy, generalized_box_iou 
 from cubercnn.util.math_util import get_cuboid_verts
 from cubercnn.modeling.detector3d.depthnet import DepthNet
@@ -309,6 +309,19 @@ def transformer_cfgs(transformer_name, cfg):
             use_dab=False,
             cfg = cfg,
         ),
+        Point3DTRANSFORMER = dict(
+            d_model = 256,
+            nhead = 8,
+            selfattn_block_x = cfg.MODEL.DETECTOR3D.PETR.ENC_BLOCK_X,
+            selfattn_block_y = cfg.MODEL.DETECTOR3D.PETR.ENC_BLOCK_Y,
+            selfattn_block_z = cfg.MODEL.DETECTOR3D.PETR.ENC_BLOCK_Z,
+            num_decoder_layers = cfg.MODEL.DETECTOR3D.PETR.HEAD.DEC_NUM,
+            dim_feedforward = 512,
+            dropout = cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_DROPOUT,
+            activation = "relu",
+            return_intermediate_dec=True,
+            cfg = cfg,
+        ),
     )
 
     return cfgs[transformer_name]
@@ -379,12 +392,20 @@ class PETR_HEAD(nn.Module):
         
         self.depth_channels = math.ceil((self.d_bound[1] - self.d_bound[0]) / self.d_bound[2])
         
-        self.pos2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
-        self.bev_pos2d_encoder = nn.Sequential(
-            nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
-        )
+        if self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "bev":
+            self.pos2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
+            self.bev_pos2d_encoder = nn.Sequential(
+                nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+            )
+        elif self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "voxel":
+            self.pos3d_generator = build_positional_encoding(dict(type='SinePositionalEncoding3D', num_feats=128, normalize=True))
+            self.voxel_pos3d_encoder = nn.Sequential(
+                nn.Linear(3 * self.embed_dims // 2, self.embed_dims),
+                nn.ReLU(),
+                nn.Linear(self.embed_dims, self.embed_dims),
+            )
 
         self.depthnet = DepthNet(in_channels = self.in_channels, mid_channels = self.in_channels, context_channels = self.embed_dims, depth_channels = self.depth_channels, cfg = cfg)
 
@@ -422,6 +443,9 @@ class PETR_HEAD(nn.Module):
         elif cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DEFORMABLE_TRANSFORMER':
             self.tgt_embed = nn.Embedding(self.num_query, self.embed_dims)
             self.transformer = build_deformable_transformer(**transformer_cfg)
+        elif cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'Point3DTRANSFORMER':
+            self.tgt_embed = nn.Embedding(self.num_query, self.embed_dims)
+            self.transformer = build_point3d_transformer(**transformer_cfg)
         self.num_decoder = 6    # Keep this variable consistent with the detr configs.
         
         # Classification head
@@ -587,15 +611,16 @@ class PETR_HEAD(nn.Module):
 
         # Notably, the BEV feature shape should be (B, C bev_z, bev_x) rather than (B, C bev_y, bev_x).
         voxel_feat = voxel_pooling_train(geom_xyz.int().contiguous(), cam_feat.contiguous(), depth.contiguous(), self.voxel_num)\
-            .permute(0, 4, 1, 2, 3).contiguous()   # Left shape: (B, C, bev_z, bev_y, bev_x)
+            .permute(0, 4, 1, 2, 3).contiguous()   # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
         if self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "bev":
             bev_feat = voxel_feat.sum(3)    # Left shape: (B, C, bev_z, bev_x)
+            bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
+            bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
+            bev_feat_pos = self.bev_pos2d_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
         elif self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "voxel":
-            raise Exception("Voxel feature has not been supported.")
-
-        bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
-        bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
-        bev_feat_pos = self.bev_pos2d_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
+            voxel_mask = voxel_feat.new_zeros(B, voxel_feat.shape[2], voxel_feat.shape[3], voxel_feat.shape[4])
+            voxel_feat_pos = self.pos3d_generator(voxel_mask) # Left shape: (B, voxel_z, voxel_y, voxel_x, 1.5*C)
+            voxel_feat_pos = self.voxel_pos3d_encoder(voxel_feat_pos).permute(0, 4, 1, 2, 3).contiguous()   # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
         
         # For vis
         '''depth_map = depth[0].argmax(0).cpu().numpy()
@@ -651,17 +676,29 @@ class PETR_HEAD(nn.Module):
 
         query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
 
-        outs_dec, init_reference, inter_references, _, _ = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
-            reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
+        if self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "bev":
+            outs_dec, init_reference, inter_references, _, _ = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
+                reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
+        elif self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "voxel":
+            outs_dec, init_reference, inter_references = self.transformer(srcs = voxel_feat, pos_embeds = voxel_feat_pos, query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
+                reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
         
         outs_dec = torch.nan_to_num(outs_dec)
 
         outputs_classes = []
         outputs_regs = []
         for lvl in range(outs_dec.shape[0]):
+            if lvl == 0:
+                reference = init_reference
+            else:
+                reference = inter_references[lvl - 1]
+            reference = inverse_sigmoid(reference)
+
             dec_cls_emb = self.cls_branches[lvl](outs_dec[lvl]) # Left shape: (B, num_query, emb_len) or (B, num_query, cls_num)
             dec_reg_result = self.reg_branches[lvl](outs_dec[lvl])  # Left shape: (B, num_query, reg_total_len)
-            
+            dec_reg_result[..., self.reg_key_manager('loc')] += reference
+            dec_reg_result[...,self. reg_key_manager('loc')] = dec_reg_result[..., self.reg_key_manager('loc')].sigmoid()
+  
             if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.OV_CLS_HEAD:
                 bias = dot_product_proj_tokens_bias.unsqueeze(1).repeat(1, self.num_query, 1)  
                 dot_product_logit = (torch.matmul(dec_cls_emb, dot_product_proj_tokens.transpose(-1, -2)) / self.log_scale.exp()) + bias    # Left shape: (B, num_query, cls_num)
@@ -675,8 +712,6 @@ class PETR_HEAD(nn.Module):
 
         outputs_classes = torch.stack(outputs_classes, dim = 0)
         outputs_regs = torch.stack(outputs_regs, dim = 0)
-        
-        outputs_regs[..., self.reg_key_manager('loc')] = outputs_regs[..., self.reg_key_manager('loc')].sigmoid()
 
         outputs_regs[..., self.reg_key_manager('loc')][..., 0] = outputs_regs[..., self.reg_key_manager('loc')][..., 0] * \
             (self.position_range[1] - self.position_range[0]) + self.position_range[0]
