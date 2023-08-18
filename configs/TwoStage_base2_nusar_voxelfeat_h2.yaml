@@ -1,10 +1,10 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  #TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
-  TRAIN: ('nuScenes_val', 'ARKitScenes_val')
-  #TEST: ('nuScenes_test', 'ARKitScenes_test',) 
-  TEST: ('nuScenes_test', 'ARKitScenes_test',)
+  TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
+  #TRAIN: ('nuScenes_val', 'ARKitScenes_val')
+  TEST: ('nuScenes_test', 'ARKitScenes_test',) 
+  #TEST: ('nuScenes_test', 'ARKitScenes_test',)
   CATEGORY_NAMES: ('machine', 'shelves', 'chair', 'car', 'table', 'sofa', 'bus', 'cabinet', 'toilet', 'motorcycle', 'bathtub', 'oven', 'sink', 'traffic cone', 'truck', 'television', 'refrigerator', 'pedestrian', 'stove', 'bicycle', 'trailer', 'barrier', 'bed')
 
 INPUT:
@@ -13,7 +13,7 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 128 #256
+  IMS_PER_BATCH: 256
   TYPE: "mmcv_AdamW"
   BASE_LR: 16e-4
   WEIGHT_DECAY: 1e-2
