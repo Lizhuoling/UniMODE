@@ -1,10 +1,13 @@
-exp_id=debug
+exp_id=TwoStage_base2_nusar_voxelfeat
 
 #ulimit -n 1024000
 
-CUDA_VISIBLE_DEVICES=0 python tools/train_net.py \
+python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
-  --num-gpus 1 \
+  --num-gpus 4 \
+  --num_machines 2 \
+  --machine_rank 0 \
+  --dist_url ji-jupyter-7115764936211730432-master-0.ji-jupyter-7115764936211730432 \
   --dist-url tcp://127.0.0.1:12345 \
   OUTPUT_DIR output/$exp_id \
   #--resume \

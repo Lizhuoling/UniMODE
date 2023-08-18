@@ -8,15 +8,15 @@ import torch.nn.functional as F
 from mmcv.cnn import xavier_init, constant_init
 from mmcv.cnn.bricks.transformer import TransformerLayerSequence, build_transformer_layer_sequence
 from mmcv.runner.base_module import BaseModule
-from mmdet.models.utils.transformer import inverse_sigmoid 
+from mmdet.models.backbones.resnet import BasicBlock
+from mmdet.models.utils.transformer import inverse_sigmoid
 
-def build_point3d_transformer(d_model, nhead, selfattn_block_x, selfattn_block_y, selfattn_block_z, num_decoder_layers, dim_feedforward, dropout, activation, return_intermediate_dec, cfg):
+from .depthnet import ASPP
+
+def build_point3d_transformer(d_model, nhead, num_decoder_layers, dim_feedforward, dropout, activation, return_intermediate_dec, cfg):
     return Point3DTransformer(
         d_model = d_model,
         nhead = nhead,
-        selfattn_block_x = selfattn_block_x, 
-        selfattn_block_y = selfattn_block_y, 
-        selfattn_block_z = selfattn_block_z,
         num_decoder_layers = num_decoder_layers,
         dim_feedforward = dim_feedforward,
         dropout = dropout,
@@ -27,21 +27,14 @@ def build_point3d_transformer(d_model, nhead, selfattn_block_x, selfattn_block_y
 
 class Point3DTransformer(BaseModule):
 
-    def __init__(self, d_model, nhead, selfattn_block_x, selfattn_block_y, selfattn_block_z, num_decoder_layers, dim_feedforward, dropout, activation, return_intermediate_dec, cfg):
+    def __init__(self, d_model, nhead, num_decoder_layers, dim_feedforward, dropout, activation, return_intermediate_dec, cfg):
         super(Point3DTransformer, self).__init__()
         self.d_model = d_model
         self.nhead = nhead
         self.cfg = cfg
         
         self.encoder = VoxelFeatEncoder(
-            selfattn_block_x = selfattn_block_x, 
-            selfattn_block_y = selfattn_block_x, 
-            selfattn_block_z = selfattn_block_z,
-            d_model = d_model, 
-            nhead = nhead, 
-            dim_feedforward = dim_feedforward, 
-            dropout = dropout, 
-            activation = activation,
+            n_emb = d_model, 
             cfg = cfg,)
 
         decoder_layer = VoxelPoint3DDecoderLayer(d_model, nhead, dropout, cfg)
@@ -62,7 +55,7 @@ class Point3DTransformer(BaseModule):
             pos_embeds: position embedding of srcs with the shape of (B, C, voxel_z, voxel_y, voxel_x)
             query_embed: shape: (B, num_query, 2*C)
         '''
-        srcs = self.encoder(srcs, pos_embeds)   # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
+        srcs = self.encoder(srcs)   # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
 
         query_pos, query = torch.split(query_embed, self.d_model , dim=2)   # query_embed shape: (bs, num_query, C), tgt shape: (bs, num_query, C)
         init_reference_out = reference_points.clone()
@@ -81,56 +74,38 @@ class Point3DTransformer(BaseModule):
         return hs, init_reference_out, inter_references_out # Their shapes: (num_dec, B, num_query, C), (B, num_query, 3), (num_dec, B, num_query, 3)
 
 class VoxelFeatEncoder(BaseModule):
-    def __init__(self, selfattn_block_x, selfattn_block_y, selfattn_block_z, d_model, nhead, dim_feedforward, dropout, activation, cfg,):
+    def __init__(self, n_emb, cfg,):
         super(VoxelFeatEncoder, self).__init__()
         self.cfg = cfg
+        self.n_emb = n_emb
 
-        self.block_x = selfattn_block_x
-        self.block_y = selfattn_block_y
-        self.block_z = selfattn_block_z
-        self.block_len = self.block_x * self.block_y * self.block_z
-
-        self.block_fc = nn.Sequential(
-            nn.Linear(self.block_len, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, self.block_len * self.block_len),
+        self.feat_smooth = nn.Sequential(
+            BasicBlock(n_emb, n_emb),
+            ASPP(n_emb, n_emb),
         )
 
-        self.channel_agg = nn.Linear(d_model, 1)
-
-    def with_pos_embed(self, tensor, pos):
-        return tensor if pos is None else tensor + pos
-
-    def forward(self, feat, feat_pos):
+    def _forward(self, feat):
         '''
         feat shape: (B, C, voxel_z, voxel_y, voxel_x)
-        feat_pos shape: (B, C, voxel_z, voxel_y, voxel_x)
         '''
-        assert feat.ndim == 5 and feat_pos.ndim == 5
         B, C, voxel_z, voxel_y, voxel_x = feat.shape
-        block_z, block_y, block_x = self.block_z, self.block_y, self.block_x
+        feat = feat.permute(0, 3, 1, 2, 4).reshape(B * voxel_y, C, voxel_z, voxel_x).contiguous()
+        feat = self.feat_smooth(feat)
+        feat = feat.view(B, voxel_y, C, voxel_z, voxel_x).permute(0, 2, 3, 1, 4)
+        return feat
 
-        ceil_voxel_z = math.ceil(voxel_z / block_z) * block_z
-        ceil_voxel_y = math.ceil(voxel_y / voxel_z) * voxel_z
-        ceil_voxel_x = math.ceil(voxel_x / block_x) * block_x
-        pad_voxel_z = ceil_voxel_z - voxel_z
-        pad_voxel_y = ceil_voxel_y - voxel_y
-        pad_voxel_x = ceil_voxel_x - voxel_x
-        
-        #feat = feat + feat_pos
-        pad_feat = F.pad(feat, (0, pad_voxel_z, 0, pad_voxel_y, 0, pad_voxel_x))    # Left shape: (B, C, ceil_voxel_z, ceil_voxel_y, ceil_voxel_x)  
-        pad_feat = pad_feat.reshape(B, C, ceil_voxel_z // block_z, block_z, ceil_voxel_y // block_y, block_y, ceil_voxel_x // block_x, block_x)\
-            .permute(0, 2, 4, 6, 3, 5, 7, 1).reshape(B * (ceil_voxel_z // block_z) * (ceil_voxel_y // block_y) * (ceil_voxel_x // block_x), block_z * block_y * block_x, C).contiguous()
+    def forward(self, feat):
+        if self.training:
+            x = torch.utils.checkpoint.checkpoint(
+                self._forward, 
+                feat
+            )
+        else:
+            x = self._forward(
+                feat
+            )
+        return x
 
-        agg_feat = self.channel_agg(pad_feat).squeeze(-1)
-        agg_conf = self.block_fc(agg_feat).sigmoid()  # Left shape: (num_block, block_len * block_len)
-        agg_conf = agg_conf.view(agg_conf.shape[0], self.block_len, self.block_len)
-        pad_feat = agg_conf @ pad_feat  # Left shape: (num_block, block_len, C)
-
-        pad_feat = pad_feat.reshape(B, ceil_voxel_z // block_z, ceil_voxel_y // block_y, ceil_voxel_x // block_x, block_z, block_y, block_x, C).permute(0, 7, 1, 4, 2, 5, 3, 6)\
-            .reshape(B, C, ceil_voxel_z, ceil_voxel_y, ceil_voxel_x)
-        output = pad_feat[:, :, :voxel_z, :voxel_y, :voxel_x].contiguous()
-        return output
 
 class VoxelPoint3DDecoder(BaseModule):
     def __init__(self, decoder_layer, num_layers, norm=None, return_intermediate=False, cfg = None):
@@ -214,7 +189,7 @@ class VoxelPoint3DDecoderLayer(BaseModule):
         constant_init(self.attention_weights, val=0., bias=0.)
         xavier_init(self.output_proj, distribution='uniform', bias=0.)
 
-    def forward(self,
+    def _forward(self,
                 query,
                 key,
                 value,
@@ -246,6 +221,36 @@ class VoxelPoint3DDecoderLayer(BaseModule):
         output = self.output_proj(output)
 
         return self.dropout(output) + inp_residual
+
+    def forward(
+        self, 
+        query,
+        key,
+        value,
+        residual=None,
+        query_pos=None,
+        reference_points=None,
+    ):
+        if self.training:
+            x = torch.utils.checkpoint.checkpoint(
+                self._forward, 
+                query,
+                key,
+                value,
+                residual,
+                query_pos,
+                reference_points,
+            )
+        else:
+            x = self._forward(
+                query,
+                key,
+                value,
+                residual,
+                query_pos,
+                reference_points,
+            )
+        return x
 
 
 def feature_sampling(voxel_feat, reference_points):

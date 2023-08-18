@@ -312,9 +312,6 @@ def transformer_cfgs(transformer_name, cfg):
         Point3DTRANSFORMER = dict(
             d_model = 256,
             nhead = 8,
-            selfattn_block_x = cfg.MODEL.DETECTOR3D.PETR.ENC_BLOCK_X,
-            selfattn_block_y = cfg.MODEL.DETECTOR3D.PETR.ENC_BLOCK_Y,
-            selfattn_block_z = cfg.MODEL.DETECTOR3D.PETR.ENC_BLOCK_Z,
             num_decoder_layers = cfg.MODEL.DETECTOR3D.PETR.HEAD.DEC_NUM,
             dim_feedforward = 512,
             dropout = cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_DROPOUT,

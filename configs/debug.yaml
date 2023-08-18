@@ -13,7 +13,7 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 4 #256
+  IMS_PER_BATCH: 128 #256
   TYPE: "mmcv_AdamW"
   BASE_LR: 16e-4
   WEIGHT_DECAY: 1e-2
@@ -47,7 +47,7 @@ MODEL:
       BACKBONE_NAME: 'VoVNet'
       BACKBONE_FP16: True
       NECK_NAME: 'SECONDFPN'
-      TRANSFORMER_NAME: 'DEFORMABLE_TRANSFORMER'
+      TRANSFORMER_NAME: 'Point3DTRANSFORMER'
       TRANSFORMER_DROPOUT: 0.1
       MATCHER_NAME: 'HungarianAssigner3D'
       NUM_QUERY: 200
@@ -56,7 +56,7 @@ MODEL:
       LID: True
       LID_DEPTH: False
       LLS_SPARSE: 1e-3
-      FEAT3D_FORM: "bev"  # "bev" or "voxel"
+      FEAT3D_FORM: "voxel"  # "bev" or "voxel"
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
@@ -82,8 +82,8 @@ MODEL:
         ENC_NUM: 1
         DEC_NUM: 6
 
-        POSITION_RANGE: [-60, 60, -20, 35, 0, 80]
-        GRID_SIZE: [1, 55, 1]
+        POSITION_RANGE: [-60, 60, -20, 30, 0, 80]
+        GRID_SIZE: [1, 25, 1]
         D_BOUND: [0.1, 100, 1]
         ENC_CAM_INTRINSIC: True 
 
