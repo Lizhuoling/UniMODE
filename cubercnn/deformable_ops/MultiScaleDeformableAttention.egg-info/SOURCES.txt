@@ -1,7 +1,4 @@
 setup.py
-/home/twilight/code/DAB-DETR/models/dab_deformable_detr/ops/src/vision.cpp
-/home/twilight/code/DAB-DETR/models/dab_deformable_detr/ops/src/cpu/ms_deform_attn_cpu.cpp
-/home/twilight/code/DAB-DETR/models/dab_deformable_detr/ops/src/cuda/ms_deform_attn_cuda.cu
 /home/twilight/code/Omni3D/cubercnn/deformable_ops/src/vision.cpp
 /home/twilight/code/Omni3D/cubercnn/deformable_ops/src/cpu/ms_deform_attn_cpu.cpp
 /home/twilight/code/Omni3D/cubercnn/deformable_ops/src/cuda/ms_deform_attn_cuda.cu

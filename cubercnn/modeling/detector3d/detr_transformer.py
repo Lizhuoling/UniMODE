@@ -11,7 +11,7 @@ import copy
 import warnings
 import pdb
 from typing import Optional, List
-from .attention import FlashMHA
+#from .attention import FlashMHA
 
 import torch
 import torch.nn.functional as F
