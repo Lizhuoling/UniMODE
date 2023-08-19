@@ -9,7 +9,9 @@ from torch import nn, Tensor
 from torch.nn.init import xavier_uniform_, constant_, uniform_, normal_
 
 from mmdet.models.utils.transformer import inverse_sigmoid 
+from mmdet.models.backbones.resnet import BasicBlock
 from cubercnn.deformable_ops.modules import MSDeformAttn
+from .depthnet import ASPP
 
 def build_deformable_transformer(**kwargs):
     return DeformableTransformer(
@@ -45,10 +47,13 @@ class DeformableTransformer(nn.Module):
         self.two_stage_num_proposals = two_stage_num_proposals
         self.use_dab = use_dab
 
-        encoder_layer = DeformableTransformerEncoderLayer(d_model, dim_feedforward,
-                                                          dropout, activation,
-                                                          num_feature_levels, nhead, enc_n_points)
-        self.encoder = DeformableTransformerEncoder(encoder_layer, num_encoder_layers, cfg = cfg)
+        if cfg.MODEL.DETECTOR3D.PETR.ENC_TYPE == 'SELFATTN':
+            encoder_layer = DeformableTransformerEncoderLayer(d_model, dim_feedforward,
+                                                            dropout, activation,
+                                                            num_feature_levels, nhead, enc_n_points)
+            self.encoder = DeformableTransformerEncoder(encoder_layer, num_encoder_layers, cfg = cfg)
+        elif cfg.MODEL.DETECTOR3D.PETR.ENC_TYPE == 'CONV':
+            self.encoder = ConvEncoder(d_model, cfg)
 
         decoder_layer = DeformableTransformerDecoderLayer(d_model, dim_feedforward,
                                                           dropout, activation,
@@ -132,7 +137,10 @@ class DeformableTransformer(nn.Module):
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
         
         # encoder
-        memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
+        if self.cfg.MODEL.DETECTOR3D.PETR.ENC_TYPE == 'SELFATTN':
+            memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
+        elif self.cfg.MODEL.DETECTOR3D.PETR.ENC_TYPE == 'CONV':
+            memory = self.encoder(srcs)
         
         # prepare input for decoder
         bs, _, c = memory.shape
@@ -158,6 +166,27 @@ class DeformableTransformer(nn.Module):
         
         return hs, init_reference_out, inter_references_out, None, None # hs shape: (num_dec, bs, num_query, L), inter_references_out shape: (num_dec, bs, num_query, 2)
 
+class ConvEncoder(nn.Module):
+    def __init__(self, n_emb, cfg,):
+        super(ConvEncoder, self).__init__()
+        self.cfg = cfg
+        self.n_emb = n_emb
+
+        self.feat_smooth = nn.Sequential(
+            BasicBlock(n_emb, n_emb),
+            ASPP(n_emb, n_emb),
+        )
+
+    def forward(self, srcs):
+        '''
+        feat shape: (B, C, voxel_z, voxel_x)
+        '''
+        assert len(srcs) == 1
+        feat = srcs[0]
+        B, C, voxel_z, voxel_x = feat.shape
+        feat = self.feat_smooth(feat)
+        feat = feat.permute(0, 2, 3, 1).reshape(B, voxel_z * voxel_x, C)
+        return feat
 
 class DeformableTransformerEncoderLayer(nn.Module):
     def __init__(self,

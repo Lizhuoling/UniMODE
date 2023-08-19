@@ -1,4 +1,4 @@
-exp_id=TwoStage_base3_omni3d
+exp_id=TwoStage_base3_omni3d_convenc
 
 #ulimit -n 65536
 
