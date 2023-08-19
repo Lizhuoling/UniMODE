@@ -27,7 +27,7 @@ from detectron2.utils.events import EventStorage
 from detectron2.utils.logger import setup_logger
 
 #torch.autograd.set_detect_anomaly(True)
-os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
+#os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
 logger = logging.getLogger("cubercnn")
 #torch.multiprocessing.set_sharing_strategy('file_system')
 

@@ -68,7 +68,10 @@ class OV_3D_Det(BaseModule):
         ### Build the 3D Det model ###
         self.detector = build_3d_detector(cfg)
 
-        #self.max_range = [9999, -9999, 9999, -9999, 9999, -9999]    # For debug
+        # For debug
+        '''self.cnt_range = np.array([-60, 60, -30, 30, 0, 100])
+        self.cnt_array = np.zeros((120, 60, 100), dtype = np.int32)
+        self.img_cnt = 0'''
 
     @torch.no_grad()
     def forward_once(self):
@@ -125,19 +128,21 @@ class OV_3D_Det(BaseModule):
         # For survey the data statistics. For debug
         '''for batch in batched_inputs:
             xyz = batch['instances'].gt_boxes3D[:, 6:9] # 9 numbers in gt_boxes3D: projected 2D center, depth, w, h, l, 3D center
-            if xyz[:, 0].min() < self.max_range[0]:
-                self.max_range[0] = xyz[:, 0].min()
-            if xyz[:, 0].max() > self.max_range[1]:
-                self.max_range[1] = xyz[:, 0].max()
-            if xyz[:, 1].min() < self.max_range[2]:
-                self.max_range[2] = xyz[:, 1].min()
-            if xyz[:, 1].max() > self.max_range[3]:
-                self.max_range[3] = xyz[:, 1].max()
-            if xyz[:, 2].min() < self.max_range[4]:
-                self.max_range[4] = xyz[:, 2].min()
-            if xyz[:, 2].max() > self.max_range[5]:
-                self.max_range[5] = xyz[:, 2].max()
-            print('max_range:', self.max_range)
+            xyz_in_range = (xyz[:, 0] > self.cnt_range[0] + 1) & (xyz[:, 0] < self.cnt_range[1] - 1) & \
+                (xyz[:, 1] > self.cnt_range[2] + 1) & (xyz[:, 1] < self.cnt_range[3] - 1) & \
+                (xyz[:, 2] > self.cnt_range[4] + 1) & (xyz[:, 2] < self.cnt_range[5] - 1)
+            xyz = xyz[xyz_in_range].numpy()
+            xyz = xyz - self.cnt_range[None, ::2]
+            xyz_coor = np.around(xyz).astype(np.int32)
+            for ele in xyz_coor:   
+                self.cnt_array[ele[0], ele[1], ele[2]] += 1
+            self.img_cnt += 1
+            if self.img_cnt % 1000 == 0:
+                print("Progress: {}/100000".format(self.img_cnt))
+            if self.img_cnt % 10000 == 0:
+                np.save('omni3d_out_statistics.npy', self.cnt_array)
+            if self.img_cnt >= 30000:
+                pdb.set_trace()
         return'''
 
         if self.cfg.MODEL.GLIP_MODEL.USE_GLIP:
