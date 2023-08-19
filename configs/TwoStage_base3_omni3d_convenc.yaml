@@ -17,7 +17,7 @@ SOLVER:
   TYPE: "mmcv_AdamW"
   BASE_LR: 6e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 58000
+  MAX_ITER: 116000
   VIRTUAL_EPOCHS: 20
   VIRTUAL_LOSS: 1.0   # To avoid the total loss is too small.
 
@@ -32,7 +32,7 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 11600
+  EVAL_PERIOD: 23200
 
 MODEL:
   META_ARCHITECTURE: "OV_3D_Det"
