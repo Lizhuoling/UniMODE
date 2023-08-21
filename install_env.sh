@@ -16,7 +16,7 @@ pip install cython opencv-python timm transformers einops ftfy opencv-python-hea
 pip install 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'
 
 apt-get autoremove nvidia-cuda-toolkit
-# Addthe following to .bashrc
+# Exit sudo, and add the following to .bashrc
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64
 export PATH=$PATH:/usr/local/cuda/bin
 export CUDA_HOME=/usr/local/cuda
