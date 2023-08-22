@@ -1,4 +1,4 @@
-exp_id=TwoStage_base3_nusar_dla34
+exp_id=TwoStage_base3_nusar
 
 #ulimit -n 65536
 

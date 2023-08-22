@@ -712,7 +712,8 @@ class PETR_HEAD(nn.Module):
 
             dec_cls_emb = self.cls_branches[lvl](outs_dec[lvl]) # Left shape: (B, num_query, emb_len) or (B, num_query, cls_num)
             dec_reg_result = self.reg_branches[lvl](outs_dec[lvl])  # Left shape: (B, num_query, reg_total_len)
-            dec_reg_result[..., self.reg_key_manager('loc')] += reference
+            dec_reg_result[..., self.reg_key_manager('loc')][..., 0:1] += reference[..., 0:1] # loc x
+            dec_reg_result[..., self.reg_key_manager('loc')][..., 2:3] += reference[..., 2:3] # loc z
             dec_reg_result[...,self. reg_key_manager('loc')] = dec_reg_result[..., self.reg_key_manager('loc')].sigmoid()
   
             if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.OV_CLS_HEAD:
