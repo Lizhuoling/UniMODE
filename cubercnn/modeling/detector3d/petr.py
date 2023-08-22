@@ -41,6 +41,7 @@ from cubercnn.util.math_util import get_cuboid_verts
 from cubercnn.modeling.detector3d.depthnet import DepthNet
 from voxel_pooling.voxel_pooling_train import voxel_pooling_train
 from cubercnn.modeling.detector3d.center_head import CENTER_HEAD
+from cubercnn.modeling.backbone.dla import DLABackbone
 
 class DETECTOR_PETR(BaseModule):
     def __init__(self, cfg):
@@ -63,8 +64,11 @@ class DETECTOR_PETR(BaseModule):
             assert cfg.INPUT.RESIZE_TGT_SIZE[0] == cfg.INPUT.RESIZE_TGT_SIZE[1]
             backbone_cfg['img_size'] = cfg.INPUT.RESIZE_TGT_SIZE[0]
         
-        self.img_backbone = build_backbone(backbone_cfg)
-        self.img_backbone.init_weights()
+        if cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME == 'DLA34':
+            self.img_backbone = DLABackbone(**backbone_cfg)
+        else:
+            self.img_backbone = build_backbone(backbone_cfg)
+            self.img_backbone.init_weights()
 
         if cfg.MODEL.DETECTOR3D.PETR.USE_NECK:
             neck_cfg = neck_cfgs(cfg.MODEL.DETECTOR3D.PETR.NECK_NAME, cfg)
@@ -254,6 +258,13 @@ def backbone_cfgs(backbone_name, cfg):
             init_ckpt = 'MODEL/eva02_L_pt_m38m_medft_in21k_ft_in1k_p14.pt',
             use_mean_pooling = False,
         ),
+        DLA34 = dict(
+            cfg = None,
+            input_shape = cfg.INPUT.RESIZE_TGT_SIZE,
+            pretrained = True,
+            DLA_TYPE = 'dla34',
+            DLA_TRICKS = False,
+        )
     )
 
     return cfgs[backbone_name]
@@ -261,8 +272,16 @@ def backbone_cfgs(backbone_name, cfg):
 def neck_cfgs(neck_name, cfg):
     if cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('ResNet50', 'ResNet101'):
         in_channels = [256, 512, 1024, 2048]
+        upsample_strides = [0.25, 0.5, 1, 2]
+        out_channels = [128, 128, 128, 128]
     elif cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('VoVNet',):
         in_channels = [256, 512, 768, 1024]
+        upsample_strides = [0.25, 0.5, 1, 2]
+        out_channels = [128, 128, 128, 128]
+    elif cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('DLA34',):
+        in_channels = [64, 128, 256, 512, 512]
+        upsample_strides = [0.25, 0.5, 1, 2, 4]
+        out_channels = [128, 128, 128, 128, 128]
 
     cfgs = dict(
         CPFPN_VoV = dict(
@@ -274,8 +293,8 @@ def neck_cfgs(neck_name, cfg):
         SECONDFPN = dict(
             type='SECONDFPN',
             in_channels=in_channels,
-            upsample_strides=[0.25, 0.5, 1, 2],
-            out_channels=[128, 128, 128, 128]
+            upsample_strides=upsample_strides,
+            out_channels=out_channels,
         ),
     )
 

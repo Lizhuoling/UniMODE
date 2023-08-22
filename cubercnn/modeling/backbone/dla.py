@@ -416,37 +416,42 @@ def dla169(pretrained=False, **kwargs):  # DLA-169
     return model
 
 class DLABackbone(Backbone):
-    def __init__(self, cfg, input_shape, pretrained=True):
+    def __init__(self, cfg, input_shape, pretrained=True, DLA_TYPE = None, DLA_TRICKS = None, **kwargs):
         super().__init__()
 
-        if cfg.MODEL.DLA.TYPE == 'dla34':
-            base  = dla34(pretrained=pretrained, tricks=cfg.MODEL.DLA.TRICKS)
+        if DLA_TYPE == None:
+            DLA_TYPE = cfg.MODEL.DLA.TYPE
+        if DLA_TRICKS == None:
+            DLA_TRICKS = cfg.MODEL.DLA.TRICKS
+
+        if DLA_TYPE == 'dla34':
+            base  = dla34(pretrained=pretrained, tricks=DLA_TRICKS)
             self._out_feature_channels = {'p2': 64, 'p3': 128, 'p4': 256, 'p5': 512, 'p6': 512}
-        elif cfg.MODEL.DLA.TYPE == 'dla46_c':
+        elif DLA_TYPE == 'dla46_c':
             base  = dla46_c(pretrained=pretrained)
             self._out_feature_channels = {'p2': 64, 'p3': 64, 'p4': 128, 'p5': 256, 'p6': 256}
-        elif cfg.MODEL.DLA.TYPE == 'dla46x_c':
+        elif DLA_TYPE == 'dla46x_c':
             base  = dla46x_c(pretrained=pretrained)
             self._out_feature_channels = {'p2': 64, 'p3': 64, 'p4': 128, 'p5': 256, 'p6': 256}
-        elif cfg.MODEL.DLA.TYPE == 'dla60x_c':
+        elif DLA_TYPE == 'dla60x_c':
             base  = dla60x_c(pretrained=pretrained)
             self._out_feature_channels = {'p2': 64, 'p3': 64, 'p4': 128, 'p5': 256, 'p6': 256}
-        elif cfg.MODEL.DLA.TYPE == 'dla60':
-            base  = dla60(pretrained=pretrained, tricks=cfg.MODEL.DLA.TRICKS)
+        elif DLA_TYPE == 'dla60':
+            base  = dla60(pretrained=pretrained, tricks=DLA_TRICKS)
             self._out_feature_channels = {'p2': 128, 'p3': 256, 'p4': 512, 'p5': 1024, 'p6': 1024}
-        elif cfg.MODEL.DLA.TYPE == 'dla60x':
+        elif DLA_TYPE == 'dla60x':
             base  = dla60x(pretrained=pretrained)
             self._out_feature_channels = {'p2': 128, 'p3': 256, 'p4': 512, 'p5': 1024, 'p6': 1024}
-        elif cfg.MODEL.DLA.TYPE == 'dla102':
-            base  = dla102(pretrained=pretrained, tricks=cfg.MODEL.DLA.TRICKS)
+        elif DLA_TYPE == 'dla102':
+            base  = dla102(pretrained=pretrained, tricks=DLA_TRICKS)
             self._out_feature_channels = {'p2': 128, 'p3': 256, 'p4': 512, 'p5': 1024, 'p6': 1024}
-        elif cfg.MODEL.DLA.TYPE == 'dla102x':
+        elif DLA_TYPE == 'dla102x':
             base  = dla102x(pretrained=pretrained)
             self._out_feature_channels = {'p2': 128, 'p3': 256, 'p4': 512, 'p5': 1024, 'p6': 1024}
-        elif cfg.MODEL.DLA.TYPE == 'dla102x2':
+        elif DLA_TYPE == 'dla102x2':
             base  = dla102x2(pretrained=pretrained)
             self._out_feature_channels = {'p2': 128, 'p3': 256, 'p4': 512, 'p5': 1024, 'p6': 1024}
-        elif cfg.MODEL.DLA.TYPE == 'dla169':
+        elif DLA_TYPE == 'dla169':
             base  = dla169(pretrained=pretrained)
             self._out_feature_channels = {'p2': 128, 'p3': 256, 'p4': 512, 'p5': 1024, 'p6': 1024}
 
