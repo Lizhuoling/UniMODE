@@ -1,11 +1,11 @@
-exp_id=TwoStage_base3_omni3d
+exp_id=TwoStage_base3_nusar_clsmask
 
 #ulimit -n 65536
 
 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
   --num-gpus 4 \
-  --num-machines 2 \
+  --num-machines 1 \
   --machine-rank 0 \
   --dist-url tcp://127.0.0.1:12345 \
   OUTPUT_DIR output/$exp_id \

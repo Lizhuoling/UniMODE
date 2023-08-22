@@ -160,9 +160,10 @@ class Omni3D(COCO):
         
         cats_ids_master = []
         cats_master = []
+        datasets_cls_dict = {}
         
         for annotation_file in annotation_files:
-
+            
             _, name, _ = util.file_parts(annotation_file)
 
             print('loading {} annotations into memory...'.format(name))
@@ -173,6 +174,12 @@ class Omni3D(COCO):
 
             if type(dataset['info']) == list:
                 dataset['info'] = dataset['info'][0]
+
+            cls_id_map = []
+            for ele in dataset['categories']:
+                if ele['name'] in filter_settings['category_names']:
+                    cls_id_map.append(ele['id'])
+            datasets_cls_dict[dataset['info']['id']] = cls_id_map
                 
             dataset['info']['known_category_ids'] = [cat['id'] for cat in dataset['categories']]
 
@@ -282,6 +289,8 @@ class Omni3D(COCO):
 
             self.dataset['annotations'] = valid_anns
 
+        MetadataCatalog.get('omni3d_model').datasets_cls_dict = datasets_cls_dict
+
         self.createIndex()
 
     def info(self):
@@ -300,7 +309,7 @@ class Omni3D(COCO):
 def register_and_store_model_metadata(datasets, output_dir, filter_settings=None):
 
     output_file = os.path.join(output_dir, 'category_meta.json')
-
+    
     if os.path.exists(output_file):
         metadata = util.load_json(output_file)
         thing_classes = metadata['thing_classes']
@@ -312,7 +321,7 @@ def register_and_store_model_metadata(datasets, output_dir, filter_settings=None
     else:
         omni3d_stats = util.load_json(os.path.join('datasets', 'Omni3D', 'stats.json'))
         thing_classes = filter_settings['category_names']
-
+        
         cat_ids = []
         for cat in thing_classes:
             cat_idx = omni3d_stats['category_names'].index(cat)

@@ -360,6 +360,15 @@ class PETR_HEAD(nn.Module):
         self.cfg = cfg
         self.in_channels = in_channels
 
+        if cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_MASK:
+            datasets_cls_dict = MetadataCatalog.get('omni3d_model').datasets_cls_dict
+            total_cls_num = len(MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id)
+            self.datasets_cls_mask = {}
+            for dataset_id in datasets_cls_dict.keys():
+                cls_mask = torch.zeros((total_cls_num,), dtype = torch.bool)
+                cls_mask[datasets_cls_dict[dataset_id]] = True
+                self.datasets_cls_mask[dataset_id] = cls_mask
+
         assert len(set(cfg.DATASETS.CATEGORY_NAMES)) == len(cfg.DATASETS.CATEGORY_NAMES)
         if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
             assert len(set(cfg.DATASETS.NOVEL_CLASS_NAMES)) == len(cfg.DATASETS.NOVEL_CLASS_NAMES)
@@ -532,7 +541,6 @@ class PETR_HEAD(nn.Module):
                 cfg = cfg,
             ))
             self.matcher_2D = build_assigner(matcher_2D_cfg)
-        
 
         # Loss functions
         #self.cls_loss = nn.BCEWithLogitsLoss(reduction = 'none')
@@ -966,7 +974,11 @@ class PETR_HEAD(nn.Module):
             if self.cfg.MODEL.DETECTOR3D.OV_PROTOCOL:
                 bs_2d_cls_gts_onehot = F.one_hot(novel_cls_gts[bs]['labels'][gt2d_idxs], num_classes = self.total_cls_num)  # Left shape: (num_2d_gt, num_cls)
                 bs_cls_gts_onehot[pred2d_idxs] = bs_2d_cls_gts_onehot.clone()
-            loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * torchvision.ops.sigmoid_focal_loss(bs_cls_scores, bs_cls_gts_onehot.float(), reduction = 'none').sum()
+            cls_loss_matrix = torchvision.ops.sigmoid_focal_loss(bs_cls_scores, bs_cls_gts_onehot.float(), reduction = 'none')  # Left shape: (num_query, num_cls)
+            if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_MASK:
+                valid_cls_mask = self.datasets_cls_mask[batched_inputs[bs]['dataset_id']].cuda()    # Left shape: (num_cls,) 
+                cls_loss_matrix = cls_loss_matrix * valid_cls_mask[None]
+            loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * cls_loss_matrix.sum()
             
             # Localization loss
             loss_dict['loc_loss_{}'.format(dec_idx)] += self.loc_weight * (math.sqrt(2) * self.reg_loss(bs_loc_preds, bs_loc_gts)\

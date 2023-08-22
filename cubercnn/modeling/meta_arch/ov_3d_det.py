@@ -149,7 +149,7 @@ class OV_3D_Det(BaseModule):
             self.forward_once()
         else:
             self.class_name_emb = None
-
+        
         images = self.preprocess_image(batched_inputs)
         ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # Left shape: (bs, 2)
 
