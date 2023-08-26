@@ -288,8 +288,10 @@ class Omni3D(COCO):
                     valid_anns.append(self.dataset['annotations'][anno_idx])
 
             self.dataset['annotations'] = valid_anns
-
-        MetadataCatalog.get('omni3d_model').datasets_cls_dict = datasets_cls_dict
+        
+        # Only for training.
+        if MetadataCatalog.get('omni3d_model').get('datasets_cls_dict') == None:
+            MetadataCatalog.get('omni3d_model').datasets_cls_dict = datasets_cls_dict
 
         self.createIndex()
 
