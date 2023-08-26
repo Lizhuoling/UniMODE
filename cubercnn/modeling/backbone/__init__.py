@@ -5,3 +5,4 @@ from .shufflenet import *
 from .dla import * 
 from .vovnet import *
 from .eva import *
+from .convnext import *

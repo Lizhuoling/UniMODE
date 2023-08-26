@@ -264,7 +264,13 @@ def backbone_cfgs(backbone_name, cfg):
             pretrained = True,
             DLA_TYPE = 'dla34',
             DLA_TRICKS = False,
-        )
+        ),
+        ConvNext_Base = dict(
+            type = 'ConvNextBaseModel',
+            pretrained = True,
+            in_22k = True,
+            out_indices = [0, 1, 2, 3],
+        ),
     )
 
     return cfgs[backbone_name]
@@ -276,6 +282,10 @@ def neck_cfgs(neck_name, cfg):
         out_channels = [128, 128, 128, 128]
     elif cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('VoVNet',):
         in_channels = [256, 512, 768, 1024]
+        upsample_strides = [0.25, 0.5, 1, 2]
+        out_channels = [128, 128, 128, 128]
+    elif cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('ConvNext_Base',):
+        in_channels = [128, 256, 512, 1024]
         upsample_strides = [0.25, 0.5, 1, 2]
         out_channels = [128, 128, 128, 128]
     elif cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('DLA34',):

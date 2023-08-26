@@ -1,11 +1,11 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
-  #TRAIN: ('ARKitScenes_val',)
-  TEST: ('nuScenes_test', 'ARKitScenes_test',) 
-  #TEST: ('ARKitScenes_val',)
-  CATEGORY_NAMES: ('machine', 'shelves', 'chair', 'car', 'table', 'sofa', 'bus', 'cabinet', 'toilet', 'motorcycle', 'bathtub', 'oven', 'sink', 'traffic cone', 'truck', 'television', 'refrigerator', 'pedestrian', 'stove', 'bicycle', 'trailer', 'barrier', 'bed')
+  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'Objectron_train', 'Objectron_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
+  #TRAIN: ('SUNRGBD_val',)
+  TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
+  ##TEST: ('SUNRGBD_val',)
+  CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
 
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)
@@ -13,11 +13,11 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 256
+  IMS_PER_BATCH: 384
   TYPE: "mmcv_AdamW"
-  BASE_LR: 16e-4
+  BASE_LR: 24e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 29000
+  MAX_ITER: 58000
   VIRTUAL_EPOCHS: 20
   VIRTUAL_LOSS: 1.0   # To avoid the total loss is too small.
 
@@ -32,7 +32,7 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 7250
+  EVAL_PERIOD: 11600
 
 MODEL:
   META_ARCHITECTURE: "OV_3D_Det"
