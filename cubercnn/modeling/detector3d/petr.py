@@ -712,10 +712,13 @@ class PETR_HEAD(nn.Module):
         outputs_classes = []
         outputs_regs = []
         for lvl in range(outs_dec.shape[0]):
-            if lvl == 0:
-                reference = init_reference
+            if self.cfg.MODEL.DETECTOR3D.PETR.ITER_QUERY_UPDATE:
+                if lvl == 0:
+                    reference = init_reference
+                else:
+                    reference = inter_references[lvl - 1]
             else:
-                reference = inter_references[lvl - 1]
+                reference = init_reference
             reference = inverse_sigmoid(reference)
 
             dec_cls_emb = self.cls_branches[lvl](outs_dec[lvl]) # Left shape: (B, num_query, emb_len) or (B, num_query, cls_num)

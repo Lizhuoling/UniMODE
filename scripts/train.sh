@@ -1,4 +1,4 @@
-exp_id=TwoStage_base3_nusar_clsmask
+exp_id=TwoStage_base3_nusar_noiter
 
 #ulimit -n 65536
 

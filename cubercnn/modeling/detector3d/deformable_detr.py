@@ -145,6 +145,7 @@ class DeformableTransformer(nn.Module):
         # prepare input for decoder
         bs, _, c = memory.shape
         if self.use_dab:
+            raise Exception("dab is not allowed.")
             reference_points = query_embed[..., self.d_model:].sigmoid() 
             tgt = query_embed[..., :self.d_model]
             tgt = tgt.unsqueeze(0).expand(bs, -1, -1)
@@ -407,6 +408,7 @@ class DeformableTransformerDecoder(nn.Module):
             reference_points_xz_input = reference_points_xz[:, :, None] * src_valid_ratios[:, None]   # Make sure the reference points are in the valid image regions.
 
             if self.high_dim_query_update and lid != 0:
+                assert False
                 query_pos = query_pos + self.high_dim_query_proj(output)                 
 
             output = layer(output, query_pos, reference_points_xz_input, src, src_spatial_shapes, src_level_start_index, src_padding_mask)
@@ -417,7 +419,8 @@ class DeformableTransformerDecoder(nn.Module):
                 tmp_y = tmp[..., 1:2]   # Left shape: (B, num_query, 1)
                 new_reference_points_xz = tmp_xz + inverse_sigmoid(reference_points_xz)
                 new_reference_points = torch.cat((new_reference_points_xz[..., :1], tmp_y, new_reference_points_xz[..., 1:]), dim = -1).sigmoid()
-                reference_points = new_reference_points.detach()
+                if self.cfg.MODEL.DETECTOR3D.PETR.ITER_QUERY_UPDATE:
+                    reference_points = new_reference_points.detach()
                 
             if self.return_intermediate:
                 intermediate.append(output)
