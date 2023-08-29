@@ -1,11 +1,11 @@
-exp_id=TwoStage_base3_omni3d_noiter
+exp_id=TwoStage_base4_omni3d
 
 #ulimit -n 65536
 
 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
   --num-gpus 4 \
-  --num-machines 2 \
+  --num-machines 1 \
   --machine-rank 0 \
   --dist-url tcp://ji-jupyter-6937317828539244544-master-0.ji-jupyter-6937317828539244544:12345 \
   OUTPUT_DIR output/$exp_id \
