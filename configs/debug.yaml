@@ -1,10 +1,10 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  #TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
-  TRAIN: ('nuScenes_val', 'ARKitScenes_val')
-  #TEST: ('nuScenes_test', 'ARKitScenes_test',) 
-  TEST: ('nuScenes_test', 'ARKitScenes_test',)
+  TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
+  #TRAIN: ('ARKitScenes_val',)
+  TEST: ('nuScenes_test', 'ARKitScenes_test',) 
+  #TEST: ('ARKitScenes_val',)
   CATEGORY_NAMES: ('machine', 'shelves', 'chair', 'car', 'table', 'sofa', 'bus', 'cabinet', 'toilet', 'motorcycle', 'bathtub', 'oven', 'sink', 'traffic cone', 'truck', 'television', 'refrigerator', 'pedestrian', 'stove', 'bicycle', 'trailer', 'barrier', 'bed')
 
 INPUT:
@@ -13,13 +13,13 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 128 #256
+  IMS_PER_BATCH: 192
   TYPE: "mmcv_AdamW"
-  BASE_LR: 16e-4
+  BASE_LR: 12e-4
   WEIGHT_DECAY: 1e-2
   MAX_ITER: 29000
   VIRTUAL_EPOCHS: 20
-  VIRTUAL_LOSS: 1.0   # To avoid the total loss is too small.
+  VIRTUAL_LOSS: 2.0   # To avoid the total loss is too small.
 
   LR_SCHEDULER_NAME: "CosineAnnealing"
   WARMUP_FACTOR: 0.3333
@@ -44,10 +44,11 @@ MODEL:
     PETR:
       GRID_MASK: False
 
-      BACKBONE_NAME: 'VoVNet'
+      BACKBONE_NAME: 'ConvNext_Base'
       BACKBONE_FP16: True
       NECK_NAME: 'SECONDFPN'
-      TRANSFORMER_NAME: 'Point3DTRANSFORMER'
+      TRANSFORMER_NAME: 'DEFORMABLE_TRANSFORMER'
+      ITER_QUERY_UPDATE: True
       TRANSFORMER_DROPOUT: 0.1
       MATCHER_NAME: 'HungarianAssigner3D'
       NUM_QUERY: 200
@@ -56,7 +57,7 @@ MODEL:
       LID: True
       LID_DEPTH: False
       LLS_SPARSE: 1e-3
-      FEAT3D_FORM: "voxel"  # "bev" or "voxel"
+      FEAT3D_FORM: "bev"  # "bev" or "voxel"
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
@@ -82,10 +83,11 @@ MODEL:
         ENC_NUM: 1
         DEC_NUM: 6
 
-        POSITION_RANGE: [-60, 60, -20, 30, 0, 80]
-        GRID_SIZE: [1, 25, 1]
+        POSITION_RANGE: [-30, 30, -40, 40, 0, 80]
+        GRID_SIZE: [1, 80, 1]
         D_BOUND: [0.1, 100, 1]
         ENC_CAM_INTRINSIC: True 
+        CLS_MASK: True 
 
       POST_PROCESS:
         CONFIDENCE_2D_THRE: 0.0

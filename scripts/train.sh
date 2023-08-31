@@ -1,4 +1,4 @@
-exp_id=TwoStage_base4_nusar
+exp_id=debug
 
 #ulimit -n 65536
 
