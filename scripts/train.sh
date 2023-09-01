@@ -1,8 +1,8 @@
-exp_id=debug
+exp_id=TwoStage_base4_nusar_depthloss
 
 #ulimit -n 65536
 
-python tools/train_net.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
   --num-gpus 4 \
   --num-machines 1 \

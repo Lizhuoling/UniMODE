@@ -408,7 +408,7 @@ def main(args):
         
     else: 
         # setup and join the data.
-        dataset_paths = [os.path.join('datasets', 'Omni3D', name + '.json') for name in cfg.DATASETS.TRAIN]
+        dataset_paths = [os.path.join('datasets', 'MM-Omni3D', name + '.json') for name in cfg.DATASETS.TRAIN]
         datasets = data.Omni3D(dataset_paths, filter_settings=filter_settings)
         
         # determine the meta data given the datasets used. 

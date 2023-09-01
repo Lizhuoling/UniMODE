@@ -3,6 +3,7 @@ import copy
 import pdb
 import math 
 import copy
+import os
 import torch
 import cv2
 import numpy as np
@@ -131,6 +132,14 @@ class DatasetMapper3D(DatasetMapper):
         # but not efficient on large generic data structures due to the use of pickle & mp.Queue.
         # Therefore it's important to use torch.Tensor.
         dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
+
+        pointcloud_path = os.path.join('datasets', dataset_dict['depth_file_path'])
+        if os.path.exists(pointcloud_path):
+            point_cloud = np.fromfile(pointcloud_path, dtype = np.float32).reshape(-1, 3)   # Left shape: (num_point, 3)
+            point_cloud = torch.as_tensor(point_cloud)
+        else:
+            point_cloud = None
+        dataset_dict["point_cloud"] = point_cloud
 
         # no need for additoinal processing at inference
         if not self.is_train:

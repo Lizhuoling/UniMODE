@@ -131,7 +131,7 @@ def is_ignore(anno, filter_settings, image_height):
 def simple_register(dataset_name, filter_settings, filter_empty=False, datasets_root_path=None):
 
     if datasets_root_path is None:
-        datasets_root_path = path_to_json = os.path.join('datasets', 'Omni3D',)
+        datasets_root_path = path_to_json = os.path.join('datasets', 'MM-Omni3D',)
     
     path_to_json = os.path.join(datasets_root_path, dataset_name + '.json')
     path_to_image_root = 'datasets'
@@ -321,7 +321,7 @@ def register_and_store_model_metadata(datasets, output_dir, filter_settings=None
         id_map = {int(idA):idB for idA, idB in id_map.items()}
 
     else:
-        omni3d_stats = util.load_json(os.path.join('datasets', 'Omni3D', 'stats.json'))
+        omni3d_stats = util.load_json(os.path.join('datasets', 'MM-Omni3D', 'stats.json'))
         thing_classes = filter_settings['category_names']
         
         cat_ids = []
@@ -406,7 +406,8 @@ def load_omni3d_json(json_file, image_root, dataset_name, filter_settings, filte
         record["height"] = img_dict["height"]
         record["width"] = img_dict["width"]
         record["K"] = img_dict["K"]
-
+        record["depth_file_path"] = img_dict["depth_file_path"]
+        
         # store optional keys when available
         for img_key in img_keys_optional:
             if img_key in img_dict:

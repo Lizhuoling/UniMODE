@@ -642,7 +642,7 @@ class PETR_HEAD(nn.Module):
             invalid_mask = invalid_mask | (depth < self.cfg.MODEL.DETECTOR3D.PETR.LLS_SPARSE) # Left shape: (B, D, H, W)
         valid_mask = ~invalid_mask
         geom_xyz = geom_xyz[valid_mask]    # Left shape: (num_proj, 6)
-
+        
         # Notably, the BEV feature shape should be (B, C bev_z, bev_x) rather than (B, C bev_y, bev_x).
         voxel_feat = voxel_pooling_train(geom_xyz.int().contiguous(), cam_feat.contiguous(), depth.contiguous(), self.voxel_num)\
             .permute(0, 4, 1, 2, 3).contiguous()   # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
@@ -767,8 +767,12 @@ class PETR_HEAD(nn.Module):
             'all_cls_scores': outputs_classes,  # outputs_classes shape: (num_dec, B, num_query, cls_num)
             'all_bbox_preds': outputs_regs, # outputs_regs shape: (num_dec, B, num_query, pred_attr_num)
             'enc_cls_scores': None,
-            'enc_bbox_preds': None, 
+            'enc_bbox_preds': None,
         }
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.DEPTH_SUPERVISION and self.training:
+            outs['depth'] = depth # For depth prediction supervision
+            outs['rescaled_K'] = Ks
         
         return outs
     
@@ -863,11 +867,49 @@ class PETR_HEAD(nn.Module):
         novel_cls_gts_list = [novel_cls_gts for _ in range(num_dec_layers)]
         
         decoder_loss_dicts = multi_apply(self.loss_single, all_cls_scores, all_bbox_preds, batched_inputs_list, novel_cls_gts_list, ori_img_resolutions, dec_idxs)[0]
-        
+
         loss_dict = {}
         for ele in decoder_loss_dicts:
             loss_dict.update(ele)
 
+        # Depth supervision to the depth head
+        if self.cfg.MODEL.DETECTOR3D.PETR.DEPTH_SUPERVISION:
+            pred_depth = detector_out['depth']  # Left shape: (B, depth_bin, feat_h, feat_w)
+            _, _, feat_h, feat_w = pred_depth.shape
+            down_factor = self.cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR
+            aug_h, aug_w = down_factor * feat_h, down_factor * feat_w
+            Ks = detector_out['rescaled_K'].clone() # Left shape: (B, 3, 3)
+            # Prepare labels
+            depth_gts = []
+            depth_masks = []
+            for bs_idx, batch_input in enumerate(batched_inputs):
+                point_cloud = batch_input['point_cloud'].to(pred_depth.device)    # Left shape: (num_point, 3)
+                depth_gt = pred_depth.new_zeros((aug_h, aug_w), dtype = torch.float32)
+                if point_cloud != None:
+                    point_uvd = (Ks[bs_idx] @ point_cloud.T).T  # Left shape: (num_point, 3)
+                    point_uvd = point_uvd[point_uvd[:, 2] > 0]
+                    point_uv = point_uvd[:, :2] / point_uvd[:, 2:]
+                    inrange_mask = (point_uv[:, 0] >= 0) & (point_uv[:, 0] <= aug_w - 1) & (point_uv[:, 1] >= 0) & (point_uv[:, 1] <= aug_h - 1)
+                    point_uv = point_uv[inrange_mask].round().long()
+                    point_d = point_uvd[inrange_mask, 2]
+                    depth_gt[point_uv[:, 1], point_uv[:, 0]] = point_d
+                    depth_gt = depth_gt.view(feat_h, down_factor, feat_w, down_factor).permute(0, 2, 1, 3).reshape(feat_h, feat_w, down_factor * down_factor)
+                    depth_gt = torch.where(depth_gt == 0.0, 1e5 * torch.ones_like(depth_gt), depth_gt)
+                    depth_gt = depth_gt.min(-1).values  # Left shape: (feat_h, feat_w)
+                    assert not self.cfg.MODEL.DETECTOR3D.PETR.LID_DEPTH
+                    depth_gt = (depth_gt - (self.d_bound[0] - self.d_bound[2])) / self.d_bound[2]
+                    depth_gt = torch.where((depth_gt < self.depth_channels + 1) & (depth_gt >= 0.0), depth_gt, torch.zeros_like(depth_gt))  # Left shape: (feat_h, feat_w)
+                    depth_gt = F.one_hot(depth_gt.long(), num_classes=self.depth_channels + 1).view(-1, self.depth_channels + 1)[:, 1:].float() # Left shape: (feat_h * feat_w, depth_ch)
+                    depth_gts.append(depth_gt)
+                else:
+                    depth_gts.append(depth_gt.new_zeros((feat_h * feat_w, self.depth_channels), dtype = torch.float32))
+            depth_gts = torch.stack(depth_gts, dim = 0) # Left shape: (B, feat_h * feat_w, depth_ch)
+            depth_preds = pred_depth.permute(0, 2, 3, 1).contiguous().view(-1, feat_h * feat_w, self.depth_channels)
+            fg_mask = torch.max(depth_gts, dim=-1).values > 0.0
+            depth_loss = (F.binary_cross_entropy(depth_preds[fg_mask], depth_gts[fg_mask], reduction='none',).sum() / max(1.0, fg_mask.sum()))
+            depth_loss = 3.0 * depth_loss
+            loss_dict['depth_loss'] = depth_loss
+            
         return loss_dict
         
     def loss_single(self, cls_scores, bbox_preds, batched_inputs, novel_cls_gts, ori_img_resolution, dec_idx):
