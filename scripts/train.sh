@@ -1,4 +1,4 @@
-exp_id=TwoStage_base4_nusar_depthloss
+exp_id=TwoStage_base4_omni3d_depthloss
 
 #ulimit -n 65536
 

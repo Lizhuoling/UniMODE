@@ -406,7 +406,8 @@ def load_omni3d_json(json_file, image_root, dataset_name, filter_settings, filte
         record["height"] = img_dict["height"]
         record["width"] = img_dict["width"]
         record["K"] = img_dict["K"]
-        record["depth_file_path"] = img_dict["depth_file_path"]
+        if "depth_file_path" in img_dict.keys():
+            record["depth_file_path"] = img_dict["depth_file_path"]
         
         # store optional keys when available
         for img_key in img_keys_optional:

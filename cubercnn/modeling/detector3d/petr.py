@@ -883,9 +883,10 @@ class PETR_HEAD(nn.Module):
             depth_gts = []
             depth_masks = []
             for bs_idx, batch_input in enumerate(batched_inputs):
-                point_cloud = batch_input['point_cloud'].to(pred_depth.device)    # Left shape: (num_point, 3)
+                point_cloud = batch_input['point_cloud']    # Left shape: (num_point, 3)
                 depth_gt = pred_depth.new_zeros((aug_h, aug_w), dtype = torch.float32)
                 if point_cloud != None:
+                    point_cloud = point_cloud.to(pred_depth.device)
                     point_uvd = (Ks[bs_idx] @ point_cloud.T).T  # Left shape: (num_point, 3)
                     point_uvd = point_uvd[point_uvd[:, 2] > 0]
                     point_uv = point_uvd[:, :2] / point_uvd[:, 2:]
