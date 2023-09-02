@@ -1,11 +1,9 @@
 _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
-  #TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
-  TRAIN: ('ARKitScenes_val',)
-  #TEST: ('nuScenes_test', 'ARKitScenes_test',) 
-  TEST: ('ARKitScenes_val',)
-  CATEGORY_NAMES: ('machine', 'shelves', 'chair', 'car', 'table', 'sofa', 'bus', 'cabinet', 'toilet', 'motorcycle', 'bathtub', 'oven', 'sink', 'traffic cone', 'truck', 'television', 'refrigerator', 'pedestrian', 'stove', 'bicycle', 'trailer', 'barrier', 'bed')
+  TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
+  TEST: ('nuScenes_test', 'KITTI_test') 
+  CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
 
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)
@@ -13,11 +11,11 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 4 #192
+  IMS_PER_BATCH: 64
   TYPE: "mmcv_AdamW"
-  BASE_LR: 12e-4
+  BASE_LR: 4e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 29000
+  MAX_ITER: 58000
   VIRTUAL_EPOCHS: 20
   VIRTUAL_LOSS: 2.0   # To avoid the total loss is too small.
 
@@ -32,7 +30,7 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 7250
+  EVAL_PERIOD: 14500
 
 MODEL:
   META_ARCHITECTURE: "OV_3D_Det"
@@ -58,7 +56,7 @@ MODEL:
       LID_DEPTH: False
       LLS_SPARSE: 1e-3
       FEAT3D_FORM: "bev"  # "bev" or "voxel"
-      DEPTH_SUPERVISION: True
+      DEPTH_SUPERVISION: False
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
