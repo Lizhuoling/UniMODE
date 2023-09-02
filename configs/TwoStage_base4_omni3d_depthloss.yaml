@@ -6,6 +6,7 @@ DATASETS:
   TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
   #TEST: ('SUNRGBD_val', 'Hypersim_val')
   CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
+  DATASET_ID_GROUP: [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17],]
 
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)
@@ -59,6 +60,7 @@ MODEL:
       LLS_SPARSE: -1.0
       FEAT3D_FORM: "bev"  # "bev" or "voxel"
       DEPTH_SUPERVISION: True
+      ADAPT_LN: True
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
