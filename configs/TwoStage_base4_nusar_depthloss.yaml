@@ -2,9 +2,9 @@ _BASE_: "Base_Omni3D_demo.yaml"
 
 DATASETS:
   TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
-  #TRAIN: ('ARKitScenes_val',)
+  TRAIN: ('ARKitScenes_val',)
   TEST: ('nuScenes_test', 'ARKitScenes_test',) 
-  #TEST: ('ARKitScenes_val',)
+  TEST: ('ARKitScenes_val',)
   CATEGORY_NAMES: ('machine', 'shelves', 'chair', 'car', 'table', 'sofa', 'bus', 'cabinet', 'toilet', 'motorcycle', 'bathtub', 'oven', 'sink', 'traffic cone', 'truck', 'television', 'refrigerator', 'pedestrian', 'stove', 'bicycle', 'trailer', 'barrier', 'bed')
 
 INPUT:
@@ -78,6 +78,7 @@ MODEL:
         LOC_WEIGHT: 0.25
         DIM_WEIGHT: 0.25
         POSE_WEIGHT: 0.25
+        DEPTH_HEAD_WEIGHT: 1.0
         DET_2D_L1_WEIGHT: 5.0
         DET_2D_GIOU_WEIGHT: 2.0
 

@@ -907,8 +907,10 @@ class PETR_HEAD(nn.Module):
             depth_gts = torch.stack(depth_gts, dim = 0) # Left shape: (B, feat_h * feat_w, depth_ch)
             depth_preds = pred_depth.permute(0, 2, 3, 1).contiguous().view(-1, feat_h * feat_w, self.depth_channels)
             fg_mask = torch.max(depth_gts, dim=-1).values > 0.0
-            depth_loss = (F.binary_cross_entropy(depth_preds[fg_mask], depth_gts[fg_mask], reduction='none',).sum() / max(1.0, fg_mask.sum()))
-            depth_loss = 3.0 * depth_loss
+            fg_mask_num = torch_dist.reduce_mean(fg_mask.sum())
+            torch_dist.synchronize()
+            depth_loss = (F.binary_cross_entropy(depth_preds[fg_mask], depth_gts[fg_mask], reduction='none',).sum() / max(1.0, fg_mask_num))
+            depth_loss = self.cfg.MODEL.DETECTOR3D.PETR.HEAD.DEPTH_HEAD_WEIGHT * depth_loss
             loss_dict['depth_loss'] = depth_loss
             
         return loss_dict
