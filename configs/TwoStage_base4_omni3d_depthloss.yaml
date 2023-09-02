@@ -56,7 +56,7 @@ MODEL:
       DOWNSAMPLE_FACTOR: 16
       LID: True
       LID_DEPTH: False
-      LLS_SPARSE: 1e-3
+      LLS_SPARSE: -1.0
       FEAT3D_FORM: "bev"  # "bev" or "voxel"
       DEPTH_SUPERVISION: True
 
