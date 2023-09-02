@@ -8,6 +8,7 @@ def get_cfg_defaults(cfg):
     # A list of category names which will be used
     cfg.DATASETS.CATEGORY_NAMES = []
     cfg.DATASETS.NOVEL_CLASS_NAMES = []
+    cfg.DATASETS.DATASET_ID_GROUP = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17],]
 
     # The category names which will be treated as ignore
     # e.g., not counting as background during training
@@ -53,7 +54,6 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.DETECTOR3D.PETR.NECK_NAME = 'CPFPN'
     cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME = 'PETR_TRANSFORMR'
     cfg.MODEL.DETECTOR3D.PETR.ITER_QUERY_UPDATE = True
-    cfg.MODEL.DETECTOR3D.PETR.ENC_TYPE = 'SELFATTN' # 'CONV' or 'SELFATTN'
     cfg.MODEL.DETECTOR3D.PETR.ENC_BLOCK_X = 5
     cfg.MODEL.DETECTOR3D.PETR.ENC_BLOCK_Y = 5
     cfg.MODEL.DETECTOR3D.PETR.ENC_BLOCK_Z = 1
@@ -62,6 +62,7 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.DETECTOR3D.PETR.LLS_SPARSE = -1.0
     cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM = "bev"  # "bev" or "voxel"
     cfg.MODEL.DETECTOR3D.PETR.DEPTH_SUPERVISION = False
+    cfg.MODEL.DETECTOR3D.PETR.ADAPT_LN = False
 
     cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL = 4
     cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION = 'after'  # before or after

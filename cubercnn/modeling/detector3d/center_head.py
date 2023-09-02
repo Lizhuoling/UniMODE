@@ -47,6 +47,20 @@ class CENTER_HEAD(nn.Module):
             nn.Conv2d(self.embed_dims, 2, kernel_size=1, padding=1 // 2, bias=True),
         )
 
+        if cfg.MODEL.DETECTOR3D.PETR.ADAPT_LN:
+            dataset_id_group = cfg.DATASETS.DATASET_ID_GROUP
+            self.dataset_group_num = len(dataset_id_group)
+            self.dataset_id_map = {}
+            for group_idx, group in enumerate(dataset_id_group):
+                for ele in group:
+                    self.dataset_id_map[ele] = group_idx
+            self.dataset_group_head = nn.Sequential(
+                BasicBlock(self.embed_dims, self.embed_dims),
+                nn.AdaptiveMaxPool2d((1, 1)),
+                nn.Conv2d(self.embed_dims, self.dataset_group_num, kernel_size=1, padding=1 // 2, bias=True),
+            ) 
+            self.softmax_se_loss = nn.CrossEntropyLoss()
+
         self.cls_loss_fnc = FocalLoss(2, 4)
 
         self.init_weights()
@@ -66,6 +80,8 @@ class CENTER_HEAD(nn.Module):
             real_focal_y = Ks[:, 1, 1]
             depth_pred = depth_pred * real_focal_y[:, None, None, None] / virtual_focal_y
         offset_pred = self.offset_head(feat)    # Left shape: (B, 2, feat_h, feat_w)
+        if self.cfg.MODEL.DETECTOR3D.PETR.ADAPT_LN:
+            dataset_group_pred = self.dataset_group_head(feat)[:, :, 0, 0]  # Left shape: (B, group_num)
 
         bs, _, feat_h, feat_w = obj_pred.shape
 
@@ -118,7 +134,7 @@ class CENTER_HEAD(nn.Module):
                 tgt_xyz_preds.append(bs_valid_center_xyz)
 
 
-        return dict(
+        center_head_out = dict(
             obj_pred = obj_pred,    # Used for computing loss.
             topk_center_conf = center_conf.detach(),    # Used for initializing queries.
             topk_center_xyz = center_xyz.detach(),  # Used for initializing queries.
@@ -127,6 +143,11 @@ class CENTER_HEAD(nn.Module):
             tgt_depth_preds = tgt_depth_preds,  # Used for computing loss.
             tgt_offset_preds = tgt_offset_preds,    # Used for computing loss.
         )
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.ADAPT_LN:
+            center_head_out.update(dataset_group_pred = dataset_group_pred)
+
+        return center_head_out
 
     def loss(self, center_head_out, Ks, batched_inputs):
         obj_preds = center_head_out['obj_pred']  # Left shape: (B, 1, feat_h, feat_w)
@@ -143,6 +164,17 @@ class CENTER_HEAD(nn.Module):
         for key in loss_info_all_batch[0].keys():
             if key != 'num_gt':
                 loss_dict[key] = sum([ele[key] for ele in loss_info_all_batch]) / total_num_gt
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.ADAPT_LN:
+            dataset_group_pred = center_head_out['dataset_group_pred']  # Left shape: (B, group_num)
+            # Prepare labels
+            dataset_group_gt = []
+            for batch_input in batched_inputs:
+                dataset_group_gt.append(self.dataset_id_map[batch_input['dataset_id']])
+            dataset_group_gt = torch.tensor(dataset_group_gt, dtype = torch.long).to(dataset_group_pred.device) # Left shape: (B,)
+            dataset_group_loss = self.softmax_se_loss(dataset_group_pred, dataset_group_gt)
+            loss_dict['dataset_group_loss'] = dataset_group_loss
+
         return loss_dict
 
     def loss_single(self, obj_pred, tgt_depth_pred, tgt_offset_pred, batch_input):

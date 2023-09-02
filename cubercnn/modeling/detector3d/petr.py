@@ -709,13 +709,15 @@ class PETR_HEAD(nn.Module):
                 tgt = torch.cat((center_initialized_tgt, tgt[:, center_proposal_num:]), dim = 1) # Left shape: (B, num_query, L) 
 
         query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
+        
+        if self.cfg.MODEL.DETECTOR3D.PETR.ADAPT_LN:
+            dataset_group_pred = center_head_out['dataset_group_pred'].softmax(dim=-1)
+        else:
+            dataset_group_pred = None
+        
+        outs_dec, init_reference, inter_references, _, _ = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
+            dataset_group_pred = dataset_group_pred, reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "bev":
-            outs_dec, init_reference, inter_references, _, _ = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
-                reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
-        elif self.cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM == "voxel":
-            outs_dec, init_reference, inter_references = self.transformer(srcs = voxel_feat, pos_embeds = voxel_feat_pos, query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
-                reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
         
         outs_dec = torch.nan_to_num(outs_dec)
 
