@@ -4,6 +4,7 @@ DATASETS:
   TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
   TEST: ('nuScenes_test', 'KITTI_test') 
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
+  DATASET_ID_GROUP: [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17],]
 
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)
@@ -57,6 +58,7 @@ MODEL:
       LLS_SPARSE: 1e-3
       FEAT3D_FORM: "bev"  # "bev" or "voxel"
       DEPTH_SUPERVISION: True
+      ADAPT_LN: True
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
