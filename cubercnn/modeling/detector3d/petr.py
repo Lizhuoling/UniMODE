@@ -20,6 +20,7 @@ from mmcv.runner.base_module import BaseModule
 from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn import Conv2d, Linear, build_activation_layer, bias_init_with_prob
 from mmcv.cnn.bricks.transformer import build_positional_encoding
+from mmdet.models.backbones.resnet import BasicBlock
 from mmdet3d.models import build_backbone
 from mmdet.models import build_neck as mmdet_build_neck
 from mmdet3d.models import build_neck as mmdet3d_build_neck
@@ -511,6 +512,13 @@ class PETR_HEAD(nn.Module):
         reg_branch = nn.Sequential(*reg_branch)
         self.reg_branches = nn.ModuleList([reg_branch for _ in range(self.num_decoder)])
 
+        if self.cfg.MODEL.DETECTOR3D.PETR.IN_DEPTH:
+            self.depth_expand = BasicBlock(1, self.embed_dims)
+            self.depth_fuse = nn.Sequential(
+                BasicBlock(self.depth_channels + self.embed_dims, self.depth_channels + self.embed_dims),
+                nn.Conv2d(self.depth_channels + self.embed_dims, self.depth_channels, kernel_size=1, padding=1 // 2, bias=True),
+            )
+
         # For computing classification score based on image feature and class name feature.
         prior_prob = self.cfg.MODEL.GLIP_MODEL.MODEL.DYHEAD.PRIOR_PROB
         bias_value = -math.log((1 - prior_prob) / prior_prob)
@@ -616,7 +624,26 @@ class PETR_HEAD(nn.Module):
         img_mask = F.interpolate(img_mask[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
 
         depth_and_feat = self.depthnet(feat, Ks)
-        depth = depth_and_feat[:, :self.depth_channels].softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)
+        depth = depth_and_feat[:, :self.depth_channels]
+        if self.cfg.MODEL.DETECTOR3D.PETR.IN_DEPTH:
+            depth_gts = []
+            _, _, feat_h, feat_w = feat.shape
+            down_factor = self.cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR
+            aug_h, aug_w = down_factor * feat_h, down_factor * feat_w
+            for bs_idx, batch_input in enumerate(batched_inputs):
+                depth_gt = batch_input['depth_gt'].to(feat.device)  
+                if depth_gt != None:
+                    depth_gt = depth_gt.view(feat_h, down_factor, feat_w, down_factor).permute(0, 2, 1, 3).reshape(feat_h, feat_w, down_factor * down_factor)
+                    depth_gt = torch.where(depth_gt == 0.0, 1e5 * torch.ones_like(depth_gt), depth_gt)
+                    depth_gt = depth_gt.min(-1).values  # Left shape: (feat_h, feat_w)
+                    depth_gts.append(depth_gt)
+                else:
+                    depth_gts.append(feat.new_zeros((feat_h * feat_w, self.depth_channels), dtype = torch.float32))
+            depth_gts = torch.stack(depth_gts, dim = 0).unsqueeze(1) # Left shape: (B, feat_h * feat_w, depth_ch)
+            depth_prior_feat = self.depth_expand(depth_gts) # Left shape: (B, C, feat_h, feat_w)
+            depth = self.depth_fuse(torch.cat((depth, depth_prior_feat), dim = 1))
+        depth = depth.softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)
+
         cam_feat = depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)]  # Left shape: (B, C, H, W)
         geom_xyz = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy(), (img_mask.shape[2], img_mask.shape[1]))    # Left shape: (B, D, H, W, 3)
  
@@ -883,19 +910,9 @@ class PETR_HEAD(nn.Module):
             Ks = detector_out['rescaled_K'].clone() # Left shape: (B, 3, 3)
             # Prepare labels
             depth_gts = []
-            depth_masks = []
             for bs_idx, batch_input in enumerate(batched_inputs):
-                point_cloud = batch_input['point_cloud']    # Left shape: (num_point, 3)
-                depth_gt = pred_depth.new_zeros((aug_h, aug_w), dtype = torch.float32)
-                if point_cloud != None:
-                    point_cloud = point_cloud.to(pred_depth.device)
-                    point_uvd = (Ks[bs_idx] @ point_cloud.T).T  # Left shape: (num_point, 3)
-                    point_uvd = point_uvd[point_uvd[:, 2] > 0]
-                    point_uv = point_uvd[:, :2] / point_uvd[:, 2:]
-                    inrange_mask = (point_uv[:, 0] >= 0) & (point_uv[:, 0] <= aug_w - 1) & (point_uv[:, 1] >= 0) & (point_uv[:, 1] <= aug_h - 1)
-                    point_uv = point_uv[inrange_mask].round().long()
-                    point_d = point_uvd[inrange_mask, 2]
-                    depth_gt[point_uv[:, 1], point_uv[:, 0]] = point_d
+                depth_gt = batch_input['depth_gt'].to(pred_depth.device)
+                if depth_gt != None:
                     depth_gt = depth_gt.view(feat_h, down_factor, feat_w, down_factor).permute(0, 2, 1, 3).reshape(feat_h, feat_w, down_factor * down_factor)
                     depth_gt = torch.where(depth_gt == 0.0, 1e5 * torch.ones_like(depth_gt), depth_gt)
                     depth_gt = depth_gt.min(-1).values  # Left shape: (feat_h, feat_w)
@@ -905,7 +922,7 @@ class PETR_HEAD(nn.Module):
                     depth_gt = F.one_hot(depth_gt.long(), num_classes=self.depth_channels + 1).view(-1, self.depth_channels + 1)[:, 1:].float() # Left shape: (feat_h * feat_w, depth_ch)
                     depth_gts.append(depth_gt)
                 else:
-                    depth_gts.append(depth_gt.new_zeros((feat_h * feat_w, self.depth_channels), dtype = torch.float32))
+                    depth_gts.append(pred_depth.new_zeros((feat_h * feat_w, self.depth_channels), dtype = torch.float32))
             depth_gts = torch.stack(depth_gts, dim = 0) # Left shape: (B, feat_h * feat_w, depth_ch)
             depth_preds = pred_depth.permute(0, 2, 3, 1).contiguous().view(-1, feat_h * feat_w, self.depth_channels)
             fg_mask = torch.max(depth_gts, dim=-1).values > 0.0

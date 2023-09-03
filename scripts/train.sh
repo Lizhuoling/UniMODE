@@ -1,4 +1,4 @@
-exp_id=TwoStage_base4_nusar_vovnet
+exp_id=TwoStage_base4_nusar_vovnet_indepth
 
 #ulimit -n 65536
 

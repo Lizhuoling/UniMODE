@@ -63,6 +63,7 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.DETECTOR3D.PETR.FEAT3D_FORM = "bev"  # "bev" or "voxel"
     cfg.MODEL.DETECTOR3D.PETR.DEPTH_SUPERVISION = False
     cfg.MODEL.DETECTOR3D.PETR.ADAPT_LN = False
+    cfg.MODEL.DETECTOR3D.PETR.IN_DEPTH = False
 
     cfg.MODEL.DETECTOR3D.PETR.VISION_FUSION_LEVEL = 4
     cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION = 'after'  # before or after

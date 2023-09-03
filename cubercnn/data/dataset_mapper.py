@@ -134,12 +134,27 @@ class DatasetMapper3D(DatasetMapper):
         dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
 
         if 'depth_file_path' in dataset_dict.keys():
+            # Load point cloud
             pointcloud_path = os.path.join('datasets', dataset_dict['depth_file_path'])
             point_cloud = np.fromfile(pointcloud_path, dtype = np.float32).reshape(-1, 3)   # Left shape: (num_point, 3)
             point_cloud = torch.as_tensor(point_cloud)
+            # Obtain zero tensor and K
+            aug_w, aug_h = self.cfg.INPUT.RESIZE_TGT_SIZE
+            depth_gt = torch.zeros((aug_h, aug_w), dtype = torch.float32)
+            K = torch.Tensor(dataset_dict['K'])
+            ori_w, ori_h = dataset_dict['width'], dataset_dict['height']
+            K[0, :] = K[0, :] * aug_w / ori_w
+            K[1, :] = K[1, :] * aug_h / ori_h
+            point_uvd = (K @ point_cloud.T).T  # Left shape: (num_point, 3)
+            point_uvd = point_uvd[point_uvd[:, 2] > 0]
+            point_uv = point_uvd[:, :2] / point_uvd[:, 2:]
+            inrange_mask = (point_uv[:, 0] >= 0) & (point_uv[:, 0] <= aug_w - 1) & (point_uv[:, 1] >= 0) & (point_uv[:, 1] <= aug_h - 1)
+            point_uv = point_uv[inrange_mask].round().long()
+            point_d = point_uvd[inrange_mask, 2]
+            depth_gt[point_uv[:, 1], point_uv[:, 0]] = point_d
         else:
-            point_cloud = None
-        dataset_dict["point_cloud"] = point_cloud
+            depth_gt = None
+        dataset_dict["depth_gt"] = depth_gt
 
         # no need for additoinal processing at inference
         if not self.is_train:
