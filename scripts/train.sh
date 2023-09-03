@@ -1,4 +1,4 @@
-exp_id=TwoStage_base4_omni3d_out_depthloss
+exp_id=TwoStage_base4_nusar_vovnet
 
 #ulimit -n 65536
 
