@@ -1,4 +1,4 @@
-exp_id=TwoStage_base4_nusar_naivedepthloss_adaptln
+exp_id=TwoStage_base4_nusar_naivedepthloss_adaptln_indepth
 
 #ulimit -n 65536
 
