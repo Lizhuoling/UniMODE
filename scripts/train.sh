@@ -1,4 +1,4 @@
-exp_id=TwoStage_base4_nusar_vovnet_naivedepthloss
+exp_id=TwoStage_base4_nusar_naivedepthloss_adaptln
 
 #ulimit -n 65536
 
