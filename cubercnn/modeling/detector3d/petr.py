@@ -514,9 +514,9 @@ class PETR_HEAD(nn.Module):
 
         if self.cfg.MODEL.DETECTOR3D.PETR.IN_DEPTH:
             self.depth_expand = BasicBlock(1, self.embed_dims)
-            self.depth_fuse = nn.Sequential(
-                BasicBlock(self.depth_channels + self.embed_dims, self.depth_channels + self.embed_dims),
-                nn.Conv2d(self.depth_channels + self.embed_dims, self.depth_channels, kernel_size=1, padding=1 // 2, bias=True),
+            self.feat_fuse = nn.Sequential(
+                BasicBlock(self.in_channels + self.embed_dims, self.in_channels + self.embed_dims),
+                nn.Conv2d(self.in_channels + self.embed_dims, self.in_channels, kernel_size=1, padding=1 // 2, bias=True),
             )
 
         # For computing classification score based on image feature and class name feature.
@@ -623,8 +623,6 @@ class PETR_HEAD(nn.Module):
         B = feat.shape[0]
         img_mask = F.interpolate(img_mask[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
 
-        depth_and_feat = self.depthnet(feat, Ks)
-        depth = depth_and_feat[:, :self.depth_channels]
         if self.cfg.MODEL.DETECTOR3D.PETR.IN_DEPTH:
             depth_gts = []
             _, _, feat_h, feat_w = feat.shape
@@ -636,12 +634,16 @@ class PETR_HEAD(nn.Module):
                     depth_gt = depth_gt.view(feat_h, down_factor, feat_w, down_factor).permute(0, 2, 1, 3).reshape(feat_h, feat_w, down_factor * down_factor)
                     depth_gt = torch.where(depth_gt == 0.0, 1e5 * torch.ones_like(depth_gt), depth_gt)
                     depth_gt = depth_gt.min(-1).values  # Left shape: (feat_h, feat_w)
+                    depth_gt = torch.where(depth_gt <= 1e3, depth_gt, torch.zeros_like(depth_gt))
                     depth_gts.append(depth_gt)
                 else:
                     depth_gts.append(feat.new_zeros((feat_h * feat_w, self.depth_channels), dtype = torch.float32))
             depth_gts = torch.stack(depth_gts, dim = 0).unsqueeze(1) # Left shape: (B, feat_h * feat_w, depth_ch)
             depth_prior_feat = self.depth_expand(depth_gts) # Left shape: (B, C, feat_h, feat_w)
-            depth = self.depth_fuse(torch.cat((depth, depth_prior_feat), dim = 1))
+            feat = self.feat_fuse(torch.cat((feat, depth_prior_feat), dim = 1))
+
+        depth_and_feat = self.depthnet(feat, Ks)
+        depth = depth_and_feat[:, :self.depth_channels]
         depth = depth.softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)
 
         cam_feat = depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)]  # Left shape: (B, C, H, W)
@@ -913,6 +915,11 @@ class PETR_HEAD(nn.Module):
             for bs_idx, batch_input in enumerate(batched_inputs):
                 depth_gt = batch_input['depth_gt'].to(pred_depth.device)
                 if depth_gt != None:
+                    '''plt.imshow(depth_gt.cpu().numpy())
+                    plt.savefig('vis.png')
+                    img = batch_input['image'].permute(1, 2, 0).numpy().astype(np.int32)
+                    plt.imshow(img)
+                    plt.savefig('vis.png')'''
                     depth_gt = depth_gt.view(feat_h, down_factor, feat_w, down_factor).permute(0, 2, 1, 3).reshape(feat_h, feat_w, down_factor * down_factor)
                     depth_gt = torch.where(depth_gt == 0.0, 1e5 * torch.ones_like(depth_gt), depth_gt)
                     depth_gt = depth_gt.min(-1).values  # Left shape: (feat_h, feat_w)
