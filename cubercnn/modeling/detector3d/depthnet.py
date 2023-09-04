@@ -171,26 +171,33 @@ class DepthNet(nn.Module):
                                       kernel_size=1,
                                       stride=1,
                                       padding=0)
-        self.depth_conv = nn.Sequential(
-            BasicBlock(mid_channels, mid_channels),
-            BasicBlock(mid_channels, mid_channels),
-            BasicBlock(mid_channels, mid_channels),
-            ASPP(mid_channels, mid_channels),
-            build_conv_layer(cfg=dict(
-                type='DCN',
-                in_channels=mid_channels,
-                out_channels=mid_channels,
-                kernel_size=3,
-                padding=1,
-                groups=4,
-                im2col_step=128,
-            )),
-            nn.Conv2d(mid_channels,
-                      depth_channels,
-                      kernel_size=1,
-                      stride=1,
-                      padding=0),
-        )
+        if cfg.MODEL.DETECTOR3D.PETR.NAIVE_DEPTH_HEAD:
+            self.depth_conv = nn.Conv2d(mid_channels,
+                        depth_channels,
+                        kernel_size=1,
+                        stride=1,
+                        padding=0)
+        else:
+            self.depth_conv = nn.Sequential(
+                BasicBlock(mid_channels, mid_channels),
+                BasicBlock(mid_channels, mid_channels),
+                BasicBlock(mid_channels, mid_channels),
+                ASPP(mid_channels, mid_channels),
+                build_conv_layer(cfg=dict(
+                    type='DCN',
+                    in_channels=mid_channels,
+                    out_channels=mid_channels,
+                    kernel_size=3,
+                    padding=1,
+                    groups=4,
+                    im2col_step=128,
+                )),
+                nn.Conv2d(mid_channels,
+                        depth_channels,
+                        kernel_size=1,
+                        stride=1,
+                        padding=0),
+            )
         self.cfg = cfg
 
         if cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_CAM_INTRINSIC:
