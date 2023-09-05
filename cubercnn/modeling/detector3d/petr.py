@@ -918,8 +918,9 @@ class PETR_HEAD(nn.Module):
             # Prepare labels
             depth_gts = []
             for bs_idx, batch_input in enumerate(batched_inputs):
-                depth_gt = batch_input['depth_gt'].to(pred_depth.device)
+                depth_gt = batch_input['depth_gt']
                 if depth_gt != None:
+                    depth_gt = depth_gt.to(pred_depth.device)
                     '''plt.imshow(depth_gt.cpu().numpy())
                     plt.savefig('vis.png')
                     img = batch_input['image'].permute(1, 2, 0).numpy().astype(np.int32)
