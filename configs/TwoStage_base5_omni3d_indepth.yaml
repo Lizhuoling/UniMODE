@@ -61,7 +61,7 @@ MODEL:
       FEAT3D_FORM: "bev"  # "bev" or "voxel"
       DEPTH_SUPERVISION: False
       NAIVE_DEPTH_HEAD: False
-      ADAPT_LN: True
+      ADAPT_LN: False
       IN_DEPTH: True
 
       CENTER_PROPOSAL:
