@@ -60,8 +60,8 @@ MODEL:
       LLS_SPARSE: 1e-3
       FEAT3D_FORM: "bev"  # "bev" or "voxel"
       DEPTH_SUPERVISION: False
-      NAIVE_DEPTH_HEAD: True
-      ADAPT_LN: True
+      NAIVE_DEPTH_HEAD: False
+      ADAPT_LN: False
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True
