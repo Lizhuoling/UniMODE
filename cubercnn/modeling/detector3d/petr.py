@@ -102,6 +102,7 @@ class DETECTOR_PETR(BaseModule):
                 depth_gt = batch_input['depth_gt']
                 if depth_gt != None: 
                     depth_gt = depth_gt.cuda().type_as(imgs)
+                    depth_gt[depth_gt!=0] = depth_gt[depth_gt!=0].sigmoid()
                     depth_gts.append(depth_gt)
                 else:
                     depth_gts.append(imgs.new_zeros((img_h, img_w), dtype = imgs.dtype))
