@@ -59,6 +59,9 @@ class DETECTOR_PETR(BaseModule):
         else:
             self.grid_mask = False
 
+        if self.cfg.MODEL.DETECTOR3D.PETR.IN_DEPTH:
+            self.img_depth_fuse = nn.Conv2d(4, 3, kernel_size=1, padding=1 // 2, bias=True)
+
         backbone_cfg = backbone_cfgs(cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME, cfg)
         if 'EVA' in cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME:
             assert len(cfg.INPUT.RESIZE_TGT_SIZE) == 2
@@ -91,6 +94,21 @@ class DETECTOR_PETR(BaseModule):
     def extract_feat(self, imgs, batched_inputs):
         if self.grid_mask and self.training:   
             imgs = self.grid_mask(imgs)
+
+        if self.cfg.MODEL.DETECTOR3D.PETR.IN_DEPTH:
+            depth_gts = []
+            _, _, img_h, img_w = imgs.shape
+            for bs_idx, batch_input in enumerate(batched_inputs):
+                depth_gt = batch_input['depth_gt']
+                if depth_gt != None: 
+                    depth_gt = depth_gt.cuda().type_as(imgs)
+                    depth_gts.append(depth_gt)
+                else:
+                    depth_gts.append(imgs.new_zeros((img_h, img_w), dtype = imgs.dtype))
+            depth_gts = torch.stack(depth_gts, dim = 0).unsqueeze(1)    # Left shape: (B, 1, img_h, img_w)
+            imgs = torch.cat((imgs, depth_gts), dim = 1)
+            imgs = self.img_depth_fuse(imgs)
+            
         backbone_feat_list = self.img_backbone(imgs)
         if type(backbone_feat_list) == dict: backbone_feat_list = list(backbone_feat_list.values())
         
@@ -512,18 +530,6 @@ class PETR_HEAD(nn.Module):
         reg_branch = nn.Sequential(*reg_branch)
         self.reg_branches = nn.ModuleList([reg_branch for _ in range(self.num_decoder)])
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.IN_DEPTH:
-            self.depth_expand = nn.Sequential(
-                BasicBlock(1, self.embed_dims),
-                BasicBlock(self.embed_dims, self.embed_dims),
-                BasicBlock(self.embed_dims, self.embed_dims),
-                BasicBlock(self.embed_dims, self.embed_dims),
-            )
-            self.feat_fuse = nn.Sequential(
-                BasicBlock(self.in_channels + self.embed_dims, self.in_channels + self.embed_dims),
-                nn.Conv2d(self.in_channels + self.embed_dims, self.in_channels, kernel_size=1, padding=1 // 2, bias=True),
-            )
-
         # For computing classification score based on image feature and class name feature.
         prior_prob = self.cfg.MODEL.GLIP_MODEL.MODEL.DYHEAD.PRIOR_PROB
         bias_value = -math.log((1 - prior_prob) / prior_prob)
@@ -627,25 +633,6 @@ class PETR_HEAD(nn.Module):
     def forward(self, feat, glip_results, class_name_emb, Ks, scale_ratios, img_mask, batched_inputs, pad_img_resolution, ori_img_resolution, center_head_out = None):
         B = feat.shape[0]
         img_mask = F.interpolate(img_mask[None], size=feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
-
-        if self.cfg.MODEL.DETECTOR3D.PETR.IN_DEPTH:
-            depth_gts = []
-            _, _, feat_h, feat_w = feat.shape
-            down_factor = self.cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR
-            aug_h, aug_w = down_factor * feat_h, down_factor * feat_w
-            for bs_idx, batch_input in enumerate(batched_inputs):
-                depth_gt = batch_input['depth_gt'].to(feat.device)  
-                if depth_gt != None:
-                    depth_gt = depth_gt.view(feat_h, down_factor, feat_w, down_factor).permute(0, 2, 1, 3).reshape(feat_h, feat_w, down_factor * down_factor)
-                    depth_gt = torch.where(depth_gt == 0.0, 1e5 * torch.ones_like(depth_gt), depth_gt)
-                    depth_gt = depth_gt.min(-1).values  # Left shape: (feat_h, feat_w)
-                    depth_gt = torch.where(depth_gt <= 1e3, depth_gt, torch.zeros_like(depth_gt))
-                    depth_gts.append(depth_gt)
-                else:
-                    depth_gts.append(feat.new_zeros((feat_h * feat_w, self.depth_channels), dtype = torch.float32))
-            depth_gts = torch.stack(depth_gts, dim = 0).unsqueeze(1) # Left shape: (B, feat_h * feat_w, depth_ch)
-            depth_prior_feat = self.depth_expand(depth_gts) # Left shape: (B, C, feat_h, feat_w)
-            feat = self.feat_fuse(torch.cat((feat, depth_prior_feat), dim = 1))
 
         depth_and_feat = self.depthnet(feat, Ks)
         depth = depth_and_feat[:, :self.depth_channels]
