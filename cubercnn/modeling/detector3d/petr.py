@@ -513,7 +513,12 @@ class PETR_HEAD(nn.Module):
         self.reg_branches = nn.ModuleList([reg_branch for _ in range(self.num_decoder)])
 
         if self.cfg.MODEL.DETECTOR3D.PETR.IN_DEPTH:
-            self.depth_expand = BasicBlock(1, self.embed_dims)
+            self.depth_expand = nn.Sequential(
+                BasicBlock(1, self.embed_dims),
+                BasicBlock(self.embed_dims, self.embed_dims),
+                BasicBlock(self.embed_dims, self.embed_dims),
+                BasicBlock(self.embed_dims, self.embed_dims),
+            )
             self.feat_fuse = nn.Sequential(
                 BasicBlock(self.in_channels + self.embed_dims, self.in_channels + self.embed_dims),
                 nn.Conv2d(self.in_channels + self.embed_dims, self.in_channels, kernel_size=1, padding=1 // 2, bias=True),
