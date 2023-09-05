@@ -1,4 +1,4 @@
-exp_id=TwoStage_base5_omni3d_depthloss_indepth
+exp_id=TwoStage_base5_omni3d_indepth
 
 #ulimit -n 65536
 

@@ -62,6 +62,7 @@ MODEL:
       DEPTH_SUPERVISION: True
       NAIVE_DEPTH_HEAD: True
       ADAPT_LN: True
+      IN_DEPTH: False
 
       CENTER_PROPOSAL:
         USE_CENTER_PROPOSAL: True

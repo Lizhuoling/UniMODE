@@ -59,8 +59,8 @@ MODEL:
       LID_DEPTH: False
       LLS_SPARSE: 1e-3
       FEAT3D_FORM: "bev"  # "bev" or "voxel"
-      DEPTH_SUPERVISION: True
-      NAIVE_DEPTH_HEAD: True
+      DEPTH_SUPERVISION: False
+      NAIVE_DEPTH_HEAD: False
       ADAPT_LN: True
       IN_DEPTH: True
 
