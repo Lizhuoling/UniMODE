@@ -390,7 +390,7 @@ class PETR_HEAD(nn.Module):
         self.cfg = cfg
         self.in_channels = in_channels
 
-        if cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_MASK:
+        if cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_MASK > 0:
             datasets_cls_dict = MetadataCatalog.get('omni3d_model').datasets_cls_dict
             total_cls_num = len(MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id)
             self.datasets_cls_mask = {}
@@ -1053,9 +1053,9 @@ class PETR_HEAD(nn.Module):
                 bs_2d_cls_gts_onehot = F.one_hot(novel_cls_gts[bs]['labels'][gt2d_idxs], num_classes = self.total_cls_num)  # Left shape: (num_2d_gt, num_cls)
                 bs_cls_gts_onehot[pred2d_idxs] = bs_2d_cls_gts_onehot.clone()
             cls_loss_matrix = torchvision.ops.sigmoid_focal_loss(bs_cls_scores, bs_cls_gts_onehot.float(), reduction = 'none')  # Left shape: (num_query, num_cls)
-            if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_MASK:
+            if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_MASK > 0:
                 valid_cls_mask = self.datasets_cls_mask[batched_inputs[bs]['dataset_id']].cuda()    # Left shape: (num_cls,) 
-                cls_loss_matrix = cls_loss_matrix * valid_cls_mask[None]
+                cls_loss_matrix = cls_loss_matrix * valid_cls_mask[None] + self.cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_MASK * (cls_loss_matrix * ~valid_cls_mask[None])
             loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * cls_loss_matrix.sum()
             
             # Localization loss
