@@ -1,4 +1,4 @@
-exp_id=TwoStage_base6_omni3dtest_dla34
+exp_id=TwoStage_base6_omni3d_finetune
 
 #ulimit -n 65536
 
@@ -8,6 +8,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/train_net.py \
   --num-machines 1 \
   --machine-rank 0 \
   --dist-url tcp://127.0.0.1:12345 \
+  MODEL.WEIGHTS_PRETRAIN output/TwoStage_base6_omni3dtest/model_recent.pth \
   OUTPUT_DIR output/$exp_id \
   #--resume \
   #MODEL.WEIGHTS_PRETRAIN output/$exp_id/model_recent.pth \
