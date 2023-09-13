@@ -1,4 +1,4 @@
-exp_id=TwoStage_base6_omni3dtest_depthloss
+exp_id=TwoStage_base6_omni3dtest_dla34
 
 #ulimit -n 65536
 
