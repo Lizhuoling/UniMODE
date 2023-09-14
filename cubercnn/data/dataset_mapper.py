@@ -133,7 +133,7 @@ class DatasetMapper3D(DatasetMapper):
         # Therefore it's important to use torch.Tensor.
         dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
 
-        if 'depth_file_path' in dataset_dict.keys():
+        if 'depth_file_path' in dataset_dict.keys() and len(self.cfg.INPUT.RESIZE_TGT_SIZE) != 1:
             # Load point cloud
             pointcloud_path = os.path.join('datasets', dataset_dict['depth_file_path'])
             point_cloud = np.fromfile(pointcloud_path, dtype = np.float32).reshape(-1, 3)   # Left shape: (num_point, 3)
