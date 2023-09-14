@@ -9,6 +9,7 @@ def get_cfg_defaults(cfg):
     cfg.DATASETS.CATEGORY_NAMES = []
     cfg.DATASETS.NOVEL_CLASS_NAMES = []
     cfg.DATASETS.DATASET_ID_GROUP = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17],]
+    cfg.DATASETS.DATA_RATIO = 1.0
 
     # The category names which will be treated as ignore
     # e.g., not counting as background during training

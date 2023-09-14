@@ -149,7 +149,7 @@ class Omni3D(COCO):
     use with Detectron2 or training per se. 
     '''
 
-    def __init__(self, annotation_files, filter_settings=None):
+    def __init__(self, annotation_files, filter_settings=None, cfg = None):
              
         # load dataset
         self.dataset,self.anns,self.cats,self.imgs = dict(),dict(),dict(),dict()
@@ -171,6 +171,23 @@ class Omni3D(COCO):
             dataset = json.load(open(annotation_file, 'r'))
             assert type(dataset)==dict, 'annotation file format {} not supported'.format(type(dataset))
             print('Done (t={:0.2f}s)'.format(time.time()- tic))
+
+            # Only for training
+            if cfg != None and (cfg.DATASETS.DATA_RATIO > 0 and cfg.DATASETS.DATA_RATIO < 1):
+                data_ratio = cfg.DATASETS.DATA_RATIO
+                image_label_relation_dict = {}
+                dataset_labels = []
+                for anno in dataset['annotations']:
+                    if anno['image_id'] not in image_label_relation_dict.keys():
+                        image_label_relation_dict[anno['image_id']] = []
+                    image_label_relation_dict[anno['image_id']].append(anno)
+                image_num = len(dataset['images'])
+                select_image_num = int(image_num * data_ratio)
+                dataset_images = dataset['images'][:select_image_num]
+                for img in dataset_images:
+                    dataset_labels += image_label_relation_dict[img['id']]
+                dataset['images'] = dataset_images
+                dataset['annotations'] = dataset_labels
 
             if type(dataset['info']) == list:
                 dataset['info'] = dataset['info'][0]
