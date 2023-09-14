@@ -185,7 +185,9 @@ class Omni3D(COCO):
                 select_image_num = int(image_num * data_ratio)
                 dataset_images = dataset['images'][:select_image_num]
                 for img in dataset_images:
-                    dataset_labels += image_label_relation_dict[img['id']]
+                    if img['id'] in image_label_relation_dict.keys():
+                        dataset_labels += image_label_relation_dict[img['id']]
+
                 dataset['images'] = dataset_images
                 dataset['annotations'] = dataset_labels
 
