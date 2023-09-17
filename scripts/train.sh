@@ -1,4 +1,4 @@
-exp_id=TwoStage_Baseline_maskloss
+exp_id=TwoStage_Baseline_sparse1e-2
 
 #ulimit -n 65536
 
