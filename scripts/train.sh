@@ -1,4 +1,4 @@
-exp_id=TwoStage_Baseline_sparse1e-2
+exp_id=TwoStage_Baseline_depthlid
 
 #ulimit -n 65536
 
