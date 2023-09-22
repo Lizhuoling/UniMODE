@@ -1,4 +1,4 @@
-exp_id=TwoStage_Baseline_depthlid
+exp_id=TwoStage_Baseline_ar
 
 #ulimit -n 65536
 

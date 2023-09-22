@@ -134,13 +134,14 @@ class OV_3D_Det(BaseModule):
             xyz = xyz[xyz_in_range].numpy()
             xyz = xyz - self.cnt_range[None, ::2]
             xyz_coor = np.around(xyz).astype(np.int32)
+            pdb.set_trace()
             for ele in xyz_coor:   
                 self.cnt_array[ele[0], ele[1], ele[2]] += 1
             self.img_cnt += 1
             if self.img_cnt % 1000 == 0:
                 print("Progress: {}/100000".format(self.img_cnt))
             if self.img_cnt % 10000 == 0:
-                np.save('omni3d_out_statistics.npy', self.cnt_array)
+                np.save('omni3d_in_statistics.npy', self.cnt_array)
             if self.img_cnt >= 30000:
                 pdb.set_trace()
         return'''
