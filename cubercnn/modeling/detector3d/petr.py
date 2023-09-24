@@ -1027,8 +1027,8 @@ class PETR_HEAD(nn.Module):
             #for box in pred_box2d:
             #    box = box.detach().cpu().numpy().astype(np.int32)
             #    cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
-            for idx in range(bs_loc_preds.shape[0]):
-                draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_preds[idx].detach().cpu(), bs_dim_preds[idx].exp().detach().cpu()), dim = 0).numpy(), bs_pose_preds[idx].detach().cpu().numpy(), color=(0,255,0), thickness=2)
+            #for idx in range(bs_loc_preds.shape[0]):
+            #    draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_preds[idx].detach().cpu(), bs_dim_preds[idx].exp().detach().cpu()), dim = 0).numpy(), bs_pose_preds[idx].detach().cpu().numpy(), color=(0,255,0), thickness=2)
             # draw labels
             gt_corners_2d, gt_corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_gts, bs_dim_gts), dim = 1), R = bs_pose_gts)
             gt_corners_2d = gt_corners_2d[:, :, :2].detach()
