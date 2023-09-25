@@ -62,13 +62,14 @@ class Omni3DFormer(BaseModule):
         return'''
         
         images = self.preprocess_image(batched_inputs)
+        points = [batch_input['point_cloud'].cuda() for batch_input in batched_inputs]
         ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # Left shape: (bs, 2)
-
+        
         if self.training:
             batched_inputs = self.remove_invalid_gts(batched_inputs)
         
         # 3D Det
-        out = self.detector(images, batched_inputs)
+        out = self.detector(images, points, batched_inputs)
         return out
 
     def preprocess_image(self, batched_inputs: List[Dict[str, torch.Tensor]]):

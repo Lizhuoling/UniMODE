@@ -21,13 +21,14 @@ from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn import Conv2d, Linear, build_activation_layer, bias_init_with_prob
 from mmcv.cnn.bricks.transformer import build_positional_encoding
 from mmdet.models.backbones.resnet import BasicBlock
-from mmdet3d.models import build_backbone
 from mmdet.models import build_neck as mmdet_build_neck
-from mmdet3d.models import build_neck as mmdet3d_build_neck
 from mmdet.models.utils import build_transformer
 from mmdet.models.utils.transformer import inverse_sigmoid
 from mmdet.core import build_assigner, build_sampler, multi_apply, reduce_mean
 from mmdet.models import build_loss
+from mmdet3d.models import build_backbone
+from mmdet3d.models import build_neck as mmdet3d_build_neck
+from mmdet3d.models import build_detector as mmdet3d_build_detector
 
 from model.util.grid_mask import GridMask
 from model.modeling import neck
@@ -43,6 +44,7 @@ from model.modeling.detector3d.depthnet import DepthNet
 from voxel_pooling.voxel_pooling_train import voxel_pooling_train
 from model.modeling.detector3d.center_head import CENTER_HEAD
 from model.modeling.backbone.dla import DLABackbone
+from model.spconv_voxelize import SPConvVoxelization
 
 class DETECTOR3D(BaseModule):
     def __init__(self, cfg):
@@ -82,13 +84,23 @@ class DETECTOR3D(BaseModule):
         else:
             detector3d_head_inchannel = self.img_backbone.embed_dim
 
+        pts_voxel_layer_cfg = pts_voxel_layer_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_NAME, cfg)
+        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_NAME == 'SPConvVoxelization':
+            self.pts_voxel_layer = SPConvVoxelization(**pts_voxel_layer_cfg)
+
+        pts_voxel_enc_cfg = pts_voxel_encoders_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_ENCODER, cfg)
+        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_ENCODER == 'HardSimpleVFE':
+            pdb.set_trace()
+            mmdet3d_build_detector(pts_voxel_enc_cfg)
+            pts_voxel_enc_cfg
+
         if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
             self.center_head = CENTER_HEAD(cfg, in_channels = detector3d_head_inchannel)
         
         self.detector3d_head = DETECTOR3D_HEAD(cfg, in_channels = detector3d_head_inchannel)
 
     @auto_fp16(apply_to=('imgs'), out_fp32=True)
-    def extract_feat(self, imgs, batched_inputs):
+    def extract_cam_feat(self, imgs, batched_inputs):
         if self.grid_mask and self.training:   
             imgs = self.grid_mask(imgs)
             
@@ -105,7 +117,31 @@ class DETECTOR3D(BaseModule):
             feat = feat.permute(0, 2, 1).reshape(feat.shape[0], -1, feat_h, feat_w).contiguous() # Left shape: (B, C, H, W)
         return feat
 
-    def forward(self, images, batched_inputs):
+    @torch.no_grad()
+    @force_fp32()
+    def extract_point_feat(self, points):
+        voxels, coors, num_points = [], [], []
+        for res in points:
+            res_voxels, res_coors, res_num_points = self.pts_voxel_layer(res)
+            voxels.append(res_voxels)
+            coors.append(res_coors)
+            num_points.append(res_num_points)
+        
+        voxels = torch.cat(voxels, dim=0)
+        num_points = torch.cat(num_points, dim=0)
+        coors_batch = []
+        for i, coor in enumerate(coors):
+            coor_pad = F.pad(coor, (1, 0), mode='constant', value=i)    # Pad batch size to the first dimension.
+            coors_batch.append(coor_pad)
+        coors_batch = torch.cat(coors_batch, dim=0)
+        pdb.set_trace()
+        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors,)
+        batch_size = coors[-1, 0] + 1
+        x = self.pts_middle_encoder(voxel_features, coors, batch_size)
+        x = self.pts_backbone(x)
+        x = self.pts_neck(x)
+
+    def forward(self, images, points, batched_inputs):
         batched_inputs = self.remove_instance_out_range(batched_inputs)
 
         Ks, scale_ratios = self.transform_intrinsics(images, batched_inputs)    # Transform the camera intrsincis based on input image augmentations.
@@ -135,10 +171,11 @@ class DETECTOR3D(BaseModule):
         print("Whether flip: {}".format(batched_inputs[batch_id]['horizontal_flip_flag']))
         pdb.set_trace()'''
         
-        feat = self.extract_feat(imgs = images.tensor, batched_inputs = batched_inputs)
+        cam_feat = self.extract_cam_feat(imgs = images.tensor, batched_inputs = batched_inputs)
+        point_feat = self.extract_point_feat(points = points)
 
         if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-            center_head_out = self.center_head(feat, Ks, batched_inputs)
+            center_head_out = self.center_head(cam_feat, Ks, batched_inputs)
         else:
             center_head_out = None
         
@@ -313,6 +350,29 @@ def neck_cfgs(neck_name, cfg):
     )
 
     return cfgs[neck_name]
+
+def pts_voxel_layer_cfgs(pts_voxel_name, cfg):
+    point_cloud_range = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.POSITION_RANGE[0::2] + cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.POSITION_RANGE[1::2]
+
+    cfgs = dict(
+        SPConvVoxelization = dict(
+            voxel_size=[0.1, 0.1, 0.2], 
+            point_cloud_range=point_cloud_range, 
+            max_num_points=10, 
+            max_voxels=(120000, 160000), 
+            num_point_features=3,
+        ),
+    )
+    return cfgs[pts_voxel_name]
+
+def pts_voxel_encoders_cfgs(pts_voxel_enc_name, cfg):
+    cfgs =dict(
+        HardSimpleVFE = dict(
+            type='HardSimpleVFE',
+            num_features=5,
+        ),
+    )
+    return cfgs[pts_voxel_enc_name]
 
 def transformer_cfgs(transformer_name, cfg):
     cfgs = dict(
