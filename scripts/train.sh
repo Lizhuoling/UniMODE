@@ -1,4 +1,4 @@
-exp_id=TwoStage_baseline_omni3dtest_dla34
+exp_id=TwoStage_baseline_omni3dtest
 
 #ulimit -n 65536
 
