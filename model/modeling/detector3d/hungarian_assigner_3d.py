@@ -147,12 +147,12 @@ class HungarianAssigner2D(BaseAssigner):
         proj3dcenter_pred = proj3dcenter_pred.unsqueeze(1).expand(-1, num_gts, -1) # Left shape: (num_preds, num_gts, 2)
         box2d_wh = (box2d_gt[:, 1, :] - box2d_gt[:, 0, :])  # Left shape: (num_gt, 2)
         box2d_area = box2d_wh.sum(-1)    # Left shape: (num_gt)
-        center_loss_threshold = self.cfg.MODEL.DETECTOR3D.PETR.HEAD.DET2D_AREA_FACTOR * box2d_area  # Left shape: (num_gt)
+        center_loss_threshold = self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.DET2D_AREA_FACTOR * box2d_area  # Left shape: (num_gt)
         proj3dcenter_cost = F.relu(F.l1_loss(proj3dcenter_pred, box_center_gt, reduction = 'none').sum(-1) - center_loss_threshold[None])   # Left shape: (num_pred, num_gt)
         cost = cls_cost + proj3dcenter_cost
 
         '''bbox2d_pred = (bbox2d_pred / ori_img_resolution[None]).view(num_preds, 4) # Left shape: (num_pred, 4)
-        det2d_iou_cost = -self.det2d_iou_weight * torch.clamp(generalized_box_iou(bbox2d_pred, bbox2d_gt), max = self.cfg.MODEL.DETECTOR3D.PETR.HEAD.DET2D_IOU_THRE)   # Left shape: (num_pred, num_gt)
+        det2d_iou_cost = -self.det2d_iou_weight * torch.clamp(generalized_box_iou(bbox2d_pred, bbox2d_gt), max = self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.DET2D_IOU_THRE)   # Left shape: (num_pred, num_gt)
         expand_bbox2d_pred = bbox2d_pred.unsqueeze(1).expand(-1, num_gts, -1)
         expand_bbox2d_gt = bbox2d_gt[None].expand(num_preds, -1, -1)
         det3d_l1_loss = self.det2d_l1_weight * F.l1_loss(expand_bbox2d_pred, expand_bbox2d_gt, reduction = 'none').sum(-1)

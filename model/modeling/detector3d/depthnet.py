@@ -171,7 +171,7 @@ class DepthNet(nn.Module):
                                       kernel_size=1,
                                       stride=1,
                                       padding=0)
-        if cfg.MODEL.DETECTOR3D.PETR.NAIVE_DEPTH_HEAD:
+        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.NAIVE_DEPTH_HEAD:
             self.depth_conv = nn.Conv2d(mid_channels,
                         depth_channels,
                         kernel_size=1,
@@ -200,7 +200,7 @@ class DepthNet(nn.Module):
             )
         self.cfg = cfg
 
-        if cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_CAM_INTRINSIC:
+        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.ENC_CAM_INTRINSIC:
             self.bn = nn.BatchNorm1d(4)
             self.depth_mlp = Mlp(4, mid_channels, mid_channels)
             self.depth_se = SELayer(mid_channels)  
@@ -222,7 +222,7 @@ class DepthNet(nn.Module):
         context = x.clone()
         depth = x.clone()
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_CAM_INTRINSIC:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.ENC_CAM_INTRINSIC:
             mlp_input = torch.stack(
                 (
                     Ks[:, 0, 0],

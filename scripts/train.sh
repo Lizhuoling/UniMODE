@@ -4,7 +4,7 @@ exp_id=camera_omni3d_convnext
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
-  --num-gpus 4 \
+  --num-gpus 1 \
   --num-machines 1 \
   --machine-rank 0 \
   --dist-url tcp://127.0.0.1:12345 \

@@ -44,7 +44,7 @@ class Transformer(nn.Module):
         self.d_model = d_model
         self.nhead = nhead
         self.cfg = cfg
-        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL'):
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.GLIP_FEAT_FUSION in ('language', 'VL'):
             self.glip_text_decoderlayer = TransformerDecoderLayer(d_model = d_model, nhead = 8)
 
     def _reset_parameters(self):
@@ -61,7 +61,7 @@ class Transformer(nn.Module):
         mask = mask.flatten(1)
         tgt = torch.zeros_like(query_embed)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('vision', 'VL'):
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.GLIP_FEAT_FUSION in ('vision', 'VL'):
             _, _, glip_visual_h, glip_visual_w = glip_visual_feat.shape
             glip_visual_feat = glip_visual_feat.permute(2, 3, 0, 1).reshape(-1, bs, c)
             glip_pos_embed = glip_pos_embed.permute(2, 3, 0, 1).reshape(-1, bs, c)
@@ -70,7 +70,7 @@ class Transformer(nn.Module):
             pos_embed = torch.cat((pos_embed, glip_pos_embed), dim = 0) # Left shape: (L, B, C)
             mask = torch.cat((mask, glip_visual_mask), dim = 1) # Left shape: (B, L)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION == 'before':
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TEXT_FUSION_POSITION == 'before':
             prev_decs, last_dec = out_dec[:-1], out_dec[-1] # prev_decs shape: (num_dec - 1, L, B, C), last_dec shape: (L, B, C)
             last_dec = self.glip_text_decoderlayer(last_dec, glip_text_feat, query_pos = query_embed)
             out_dec = torch.cat((prev_decs, last_dec[None]), dim  = 0)  # Left shape: (num_dec, L, B, C)
@@ -79,7 +79,7 @@ class Transformer(nn.Module):
         hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
                           pos=pos_embed, query_pos=query_embed)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.PETR.TEXT_FUSION_POSITION == 'after':
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TEXT_FUSION_POSITION == 'after':
             prev_decs, last_dec = hs[:-1], hs[-1] # prev_decs shape: (num_dec - 1, L, B, C), last_dec shape: (L, B, C)
             last_dec = self.glip_text_decoderlayer(last_dec, glip_text_feat, query_pos = query_embed)
             hs = torch.cat((prev_decs, last_dec[None]), dim  = 0)  # Left shape: (num_dec, L, B, C)

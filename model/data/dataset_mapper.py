@@ -80,7 +80,7 @@ class DatasetMapper3D(DatasetMapper):
         else:
             self.color_aug = None
 
-        self.pad_meet_downratio = Resize_DownRatio(cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR)
+        self.pad_meet_downratio = Resize_DownRatio(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.DOWNSAMPLE_FACTOR)
 
     @classmethod
     def from_config(cls, cfg, is_train: bool = True):
@@ -161,9 +161,9 @@ class DatasetMapper3D(DatasetMapper):
             instances = detection_utils.filter_empty_instances(instances)
             dataset_dict["instances"] = instances
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
             augmented_image_h, augmented_image_w = image.shape[0], image.shape[1]
-            downsample_factor = self.cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR
+            downsample_factor = self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.DOWNSAMPLE_FACTOR
             feat_h, feat_w = augmented_image_h // downsample_factor, augmented_image_w // downsample_factor
             # Prepare 2D center gts.
             heatmap = np.zeros((feat_h, feat_w), dtype = np.float32)

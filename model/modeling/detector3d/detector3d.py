@@ -44,48 +44,48 @@ from voxel_pooling.voxel_pooling_train import voxel_pooling_train
 from model.modeling.detector3d.center_head import CENTER_HEAD
 from model.modeling.backbone.dla import DLABackbone
 
-class DETECTOR_PETR(BaseModule):
+class DETECTOR3D(BaseModule):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.fp16_enabled = cfg.MODEL.DETECTOR3D.PETR.BACKBONE_FP16
-        self.position_range = cfg.MODEL.DETECTOR3D.PETR.HEAD.POSITION_RANGE
+        self.fp16_enabled = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_FP16
+        self.position_range = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.POSITION_RANGE
 
         self.img_mean = torch.Tensor(self.cfg.MODEL.PIXEL_MEAN)  # (b, g, r)
         self.img_std = torch.Tensor(self.cfg.MODEL.PIXEL_STD)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.GRID_MASK:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.GRID_MASK:
             self.grid_mask = GridMask(True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
         else:
             self.grid_mask = False
 
-        backbone_cfg = backbone_cfgs(cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME, cfg)
-        if 'EVA' in cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME:
+        backbone_cfg = backbone_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME, cfg)
+        if 'EVA' in cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME:
             assert len(cfg.INPUT.RESIZE_TGT_SIZE) == 2
             assert cfg.INPUT.RESIZE_TGT_SIZE[0] == cfg.INPUT.RESIZE_TGT_SIZE[1]
             backbone_cfg['img_size'] = cfg.INPUT.RESIZE_TGT_SIZE[0]
         
-        if cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME == 'DLA34':
+        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME == 'DLA34':
             self.img_backbone = DLABackbone(**backbone_cfg)
         else:
             self.img_backbone = build_backbone(backbone_cfg)
             self.img_backbone.init_weights()
 
-        if cfg.MODEL.DETECTOR3D.PETR.USE_NECK:
-            neck_cfg = neck_cfgs(cfg.MODEL.DETECTOR3D.PETR.NECK_NAME, cfg)
+        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.USE_NECK:
+            neck_cfg = neck_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.NECK_NAME, cfg)
             if neck_cfg['type'] == 'SECONDFPN':
                 self.img_neck = mmdet3d_build_neck(neck_cfg)
-                petr_head_inchannel = sum(neck_cfg['out_channels'])
+                detector3d_head_inchannel = sum(neck_cfg['out_channels'])
             else:
                 self.img_neck = mmdet_build_neck(neck_cfg)
-                petr_head_inchannel = neck_cfg['out_channels']
+                detector3d_head_inchannel = neck_cfg['out_channels']
         else:
-            petr_head_inchannel = self.img_backbone.embed_dim
+            detector3d_head_inchannel = self.img_backbone.embed_dim
 
-        if cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-            self.center_head = CENTER_HEAD(cfg, in_channels = petr_head_inchannel)
+        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            self.center_head = CENTER_HEAD(cfg, in_channels = detector3d_head_inchannel)
         
-        self.petr_head = PETR_HEAD(cfg, in_channels = petr_head_inchannel)
+        self.detector3d_head = DETECTOR3D_HEAD(cfg, in_channels = detector3d_head_inchannel)
 
     @auto_fp16(apply_to=('imgs'), out_fp32=True)
     def extract_feat(self, imgs, batched_inputs):
@@ -95,10 +95,10 @@ class DETECTOR_PETR(BaseModule):
         backbone_feat_list = self.img_backbone(imgs)
         if type(backbone_feat_list) == dict: backbone_feat_list = list(backbone_feat_list.values())
         
-        if self.cfg.MODEL.DETECTOR3D.PETR.USE_NECK:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.USE_NECK:
             feat = self.img_neck(backbone_feat_list)[0]
         else:
-            assert 'EVA' in self.cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME
+            assert 'EVA' in self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME
             patch_size = 14
             feat_h, feat_w = self.cfg.INPUT.RESIZE_TGT_SIZE[0] // patch_size, self.cfg.INPUT.RESIZE_TGT_SIZE[1] // patch_size
             feat = backbone_feat_list
@@ -129,7 +129,7 @@ class DETECTOR_PETR(BaseModule):
             gt_dim3d = gt_3d[3:6].cpu()
             gt_rot3d = batched_inputs[batch_id]['instances']._fields['gt_poses'][gt_cnt].cpu()
             draw_3d_box(img, K.cpu().numpy(), torch.cat((gt_center3d, gt_dim3d), dim = 0).numpy(), gt_rot3d.numpy()) d
-        #box2d_centers = (batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] * self.cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR).int().cpu().numpy()
+        #box2d_centers = (batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] * self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.DOWNSAMPLE_FACTOR).int().cpu().numpy()
         #for box_center in box2d_centers:
         #    cv2.circle(img, box_center, radius = 3, color = (0, 0, 255), thickness = -1)
         print("Whether flip: {}".format(batched_inputs[batch_id]['horizontal_flip_flag']))
@@ -137,12 +137,12 @@ class DETECTOR_PETR(BaseModule):
         
         feat = self.extract_feat(imgs = images.tensor, batched_inputs = batched_inputs)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
             center_head_out = self.center_head(feat, Ks, batched_inputs)
         else:
             center_head_out = None
         
-        petr_out = self.petr_head(feat, Ks, scale_ratios, masks, batched_inputs, 
+        petr_out = self.detector3d_head(feat, Ks, scale_ratios, masks, batched_inputs, 
             ori_img_resolution = ori_img_resolution, 
             center_head_out = center_head_out,
         )
@@ -158,14 +158,14 @@ class DETECTOR_PETR(BaseModule):
             return self.inference(detector_out, batched_inputs, ori_img_resolution)
 
     def loss(self, detector_out, batched_inputs, ori_img_resolution):
-        loss_dict = self.petr_head.loss(detector_out['petr_out'], batched_inputs, ori_img_resolution)
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+        loss_dict = self.detector3d_head.loss(detector_out['petr_out'], batched_inputs, ori_img_resolution)
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
             center_head_loss_dict = self.center_head.loss(detector_out['center_head_out'], detector_out['Ks'], batched_inputs)
             loss_dict.update(center_head_loss_dict)
         return loss_dict
     
     def inference(self, detector_out, batched_inputs, ori_img_resolution):
-        inference_results = self.petr_head.inference(detector_out['petr_out'], batched_inputs, ori_img_resolution)
+        inference_results = self.detector3d_head.inference(detector_out['petr_out'], batched_inputs, ori_img_resolution)
         return inference_results
 
     def transform_intrinsics(self, images, batched_inputs):
@@ -207,7 +207,7 @@ class DETECTOR_PETR(BaseModule):
                 batched_inputs[batch_id]['instances']._fields['gt_poses'] = batched_inputs[batch_id]['instances']._fields['gt_poses'][instance_in_rang_flag]
                 batched_inputs[batch_id]['instances']._fields['gt_keypoints'] = batched_inputs[batch_id]['instances']._fields['gt_keypoints'][instance_in_rang_flag]
                 batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'] = batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'][instance_in_rang_flag]
-                if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+                if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
                     batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'][instance_in_rang_flag]
                     batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'][instance_in_rang_flag]
         return batched_inputs
@@ -218,7 +218,7 @@ def backbone_cfgs(backbone_name, cfg):
             type='ResNet',
             depth=50,
             num_stages=4,
-            out_indices=cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS,
+            out_indices=cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.FEAT_LEVEL_IDXS,
             frozen_stages=-1,
             norm_cfg=dict(type='BN2d', requires_grad=False),
             norm_eval=False,
@@ -232,7 +232,7 @@ def backbone_cfgs(backbone_name, cfg):
             type='ResNet',
             depth=101,
             num_stages=4,
-            out_indices=cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS,
+            out_indices=cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.FEAT_LEVEL_IDXS,
             frozen_stages=1,
             norm_cfg=dict(type='BN2d', requires_grad=False),
             norm_eval=True,
@@ -247,7 +247,7 @@ def backbone_cfgs(backbone_name, cfg):
             norm_eval=False,
             frozen_stages=-1,
             input_ch=3,
-            out_features=cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS,
+            out_features=cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.FEAT_LEVEL_IDXS,
             pretrained = 'MODEL/fcos3d_vovnet_imgbackbone_omni3d.pth',
         ),
         EVA_Base = dict(
@@ -280,19 +280,19 @@ def backbone_cfgs(backbone_name, cfg):
     return cfgs[backbone_name]
 
 def neck_cfgs(neck_name, cfg):
-    if cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('ResNet50', 'ResNet101'):
+    if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME in ('ResNet50', 'ResNet101'):
         in_channels = [256, 512, 1024, 2048]
         upsample_strides = [0.25, 0.5, 1, 2]
         out_channels = [128, 128, 128, 128]
-    elif cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('VoVNet',):
+    elif cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME in ('VoVNet',):
         in_channels = [256, 512, 768, 1024]
         upsample_strides = [0.25, 0.5, 1, 2]
         out_channels = [128, 128, 128, 128]
-    elif cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('ConvNext_Base',):
+    elif cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME in ('ConvNext_Base',):
         in_channels = [128, 256, 512, 1024]
         upsample_strides = [0.25, 0.5, 1, 2]
         out_channels = [128, 128, 128, 128]
-    elif cfg.MODEL.DETECTOR3D.PETR.BACKBONE_NAME in ('DLA34',):
+    elif cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME in ('DLA34',):
         in_channels = [64, 128, 256, 512, 512]
         upsample_strides = [0.25, 0.5, 1, 2, 4]
         out_channels = [128, 128, 128, 128, 128]
@@ -302,7 +302,7 @@ def neck_cfgs(neck_name, cfg):
             type='CPFPN',
             in_channels=in_channels,
             out_channels=256,
-            num_outs=len(cfg.MODEL.DETECTOR3D.PETR.FEAT_LEVEL_IDXS),
+            num_outs=len(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.FEAT_LEVEL_IDXS),
         ),
         SECONDFPN = dict(
             type='SECONDFPN',
@@ -321,33 +321,33 @@ def transformer_cfgs(transformer_name, cfg):
             dropout=0.1, 
             nheads=8,
             dim_feedforward=2048,
-            enc_layers=cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_NUM,
-            dec_layers=cfg.MODEL.DETECTOR3D.PETR.HEAD.DEC_NUM,
+            enc_layers=cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.ENC_NUM,
+            dec_layers=cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.DEC_NUM,
             pre_norm=False,
         ),
         DEFORMABLE_TRANSFORMER = dict(
             d_model = 256,
             nhead = 8,
-            num_encoder_layers = cfg.MODEL.DETECTOR3D.PETR.HEAD.ENC_NUM,
-            num_decoder_layers = cfg.MODEL.DETECTOR3D.PETR.HEAD.DEC_NUM,
+            num_encoder_layers = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.ENC_NUM,
+            num_decoder_layers = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.DEC_NUM,
             dim_feedforward = 512,
-            dropout = cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_DROPOUT,
+            dropout = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TRANSFORMER_DROPOUT,
             activation = "relu",
             return_intermediate_dec=True,
             num_feature_levels=1,   # Sample on the BEV feature.
             dec_n_points=4,
             enc_n_points=4,
             two_stage=False,
-            two_stage_num_proposals=cfg.MODEL.DETECTOR3D.PETR.NUM_QUERY,
+            two_stage_num_proposals=cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.NUM_QUERY,
             use_dab=False,
             cfg = cfg,
         ),
         Point3DTRANSFORMER = dict(
             d_model = 256,
             nhead = 8,
-            num_decoder_layers = cfg.MODEL.DETECTOR3D.PETR.HEAD.DEC_NUM,
+            num_decoder_layers = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.DEC_NUM,
             dim_feedforward = 512,
-            dropout = cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_DROPOUT,
+            dropout = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TRANSFORMER_DROPOUT,
             activation = "relu",
             return_intermediate_dec=True,
             cfg = cfg,
@@ -368,13 +368,13 @@ def matcher_cfgs(matcher_name, cfg):
     return cfgs[matcher_name]
 
 
-class PETR_HEAD(nn.Module):
+class DETECTOR3D_HEAD(nn.Module):
     def __init__(self, cfg, in_channels):
         super().__init__()
         self.cfg = cfg
         self.in_channels = in_channels
 
-        if cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_MASK > 0:
+        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_MASK > 0:
             datasets_cls_dict = MetadataCatalog.get('omni3d_model').datasets_cls_dict
             total_cls_num = len(MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id)
             self.datasets_cls_mask = {}
@@ -385,23 +385,23 @@ class PETR_HEAD(nn.Module):
 
         assert len(set(cfg.DATASETS.CATEGORY_NAMES)) == len(cfg.DATASETS.CATEGORY_NAMES)
         self.total_cls_num = len(cfg.DATASETS.CATEGORY_NAMES)
-        self.num_query = cfg.MODEL.DETECTOR3D.PETR.NUM_QUERY
+        self.num_query = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.NUM_QUERY
 
-        self.downsample_factor = cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR
-        self.position_range = cfg.MODEL.DETECTOR3D.PETR.HEAD.POSITION_RANGE  # (x_min, x_max, y_min, y_max, z_min, z_max). x: right, y: down, z: inwards
-        self.x_bound = [self.position_range[0], self.position_range[1], cfg.MODEL.DETECTOR3D.PETR.HEAD.GRID_SIZE[0]]
-        self.y_bound = [self.position_range[2], self.position_range[3], cfg.MODEL.DETECTOR3D.PETR.HEAD.GRID_SIZE[1]]
-        self.z_bound = [self.position_range[4], self.position_range[5], cfg.MODEL.DETECTOR3D.PETR.HEAD.GRID_SIZE[2]]
-        self.d_bound = cfg.MODEL.DETECTOR3D.PETR.HEAD.D_BOUND
+        self.downsample_factor = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.DOWNSAMPLE_FACTOR
+        self.position_range = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.POSITION_RANGE  # (x_min, x_max, y_min, y_max, z_min, z_max). x: right, y: down, z: inwards
+        self.x_bound = [self.position_range[0], self.position_range[1], cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.GRID_SIZE[0]]
+        self.y_bound = [self.position_range[2], self.position_range[3], cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.GRID_SIZE[1]]
+        self.z_bound = [self.position_range[4], self.position_range[5], cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.GRID_SIZE[2]]
+        self.d_bound = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.D_BOUND
 
         self.embed_dims = 256
-        self.uncern_range = cfg.MODEL.DETECTOR3D.PETR.HEAD.UNCERN_RANGE
+        self.uncern_range = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.UNCERN_RANGE
 
         self.register_buffer('voxel_size', torch.Tensor([row[2] for row in [self.x_bound, self.y_bound, self.z_bound]]))
         self.register_buffer('voxel_coord', torch.Tensor([row[0] + row[2] / 2.0 for row in [self.x_bound, self.y_bound, self.z_bound]]))
         self.register_buffer('voxel_num', torch.LongTensor([(row[1] - row[0]) / row[2]for row in [self.x_bound, self.y_bound, self.z_bound]]))
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.LID_DEPTH:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LID_DEPTH:
             depth_start, depth_end, depth_interval = self.d_bound
             depth_num = math.ceil((depth_end - depth_start) / depth_interval)
             index  = torch.arange(start=0, end=depth_num, step=1).float()
@@ -409,8 +409,8 @@ class PETR_HEAD(nn.Module):
             bin_size = (depth_end - depth_start) / (depth_num * (1 + depth_num))
             self.d_coords = depth_start + bin_size * index * index_1    # Left shape: (D,)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.LID:
-            coor_z_start, coor_z_end, coor_z_interval =  self.position_range[4], self.position_range[5], cfg.MODEL.DETECTOR3D.PETR.HEAD.GRID_SIZE[2]
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LID:
+            coor_z_start, coor_z_end, coor_z_interval =  self.position_range[4], self.position_range[5], cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.GRID_SIZE[2]
             coor_z_num = math.ceil((coor_z_end - coor_z_start) / coor_z_interval)
             self.coor_z_num = coor_z_num
             coor_z_index  = torch.arange(start=0, end=coor_z_num, step=1).float()
@@ -436,7 +436,7 @@ class PETR_HEAD(nn.Module):
         self.depthnet = DepthNet(in_channels = self.in_channels, mid_channels = self.in_channels, context_channels = self.embed_dims, depth_channels = self.depth_channels, cfg = cfg)
 
         # Generating query heads
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
             self.center_conf_emb = nn.Linear(1, self.embed_dims)
             self.center_xyz_emb = nn.Sequential(
                 nn.Linear(self.embed_dims*3//2, self.embed_dims),
@@ -452,14 +452,14 @@ class PETR_HEAD(nn.Module):
         )
 
         # Transformer
-        transformer_cfg = transformer_cfgs(cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME, cfg)
+        transformer_cfg = transformer_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TRANSFORMER_NAME, cfg)
         transformer_cfg['cfg'] = cfg
-        if cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DETR_TRANSFORMER':
+        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TRANSFORMER_NAME == 'DETR_TRANSFORMER':
             self.transformer = build_detr_transformer(**transformer_cfg)
-        elif cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'DEFORMABLE_TRANSFORMER':
+        elif cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TRANSFORMER_NAME == 'DEFORMABLE_TRANSFORMER':
             self.tgt_embed = nn.Embedding(self.num_query, self.embed_dims)
             self.transformer = build_deformable_transformer(**transformer_cfg)
-        elif cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'Point3DTRANSFORMER':
+        elif cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TRANSFORMER_NAME == 'Point3DTRANSFORMER':
             self.tgt_embed = nn.Embedding(self.num_query, self.embed_dims)
             self.transformer = build_point3d_transformer(**transformer_cfg)
         self.num_decoder = 6    # Keep this variable consistent with the detr configs.
@@ -490,14 +490,14 @@ class PETR_HEAD(nn.Module):
         self.reg_branches = nn.ModuleList([reg_branch for _ in range(self.num_decoder)])
 
         # One-to-one macther
-        self.cls_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_WEIGHT
-        self.loc_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.LOC_WEIGHT
-        self.dim_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.DIM_WEIGHT
-        self.pose_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.POSE_WEIGHT
-        self.det2d_l1_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.DET_2D_L1_WEIGHT
-        self.det2d_iou_weight = cfg.MODEL.DETECTOR3D.PETR.HEAD.DET_2D_GIOU_WEIGHT
+        self.cls_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_WEIGHT
+        self.loc_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.LOC_WEIGHT
+        self.dim_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.DIM_WEIGHT
+        self.pose_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.POSE_WEIGHT
+        self.det2d_l1_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.DET_2D_L1_WEIGHT
+        self.det2d_iou_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.DET_2D_GIOU_WEIGHT
         
-        matcher_cfg = matcher_cfgs(cfg.MODEL.DETECTOR3D.PETR.MATCHER_NAME, cfg)
+        matcher_cfg = matcher_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.MATCHER_NAME, cfg)
         matcher_cfg.update(dict(total_cls_num = self.total_cls_num, 
                                 cls_weight = self.cls_weight, 
                                 loc_weight = self.loc_weight,
@@ -520,7 +520,7 @@ class PETR_HEAD(nn.Module):
         self.init_weights()
 
     def init_weights(self):
-        if self.cfg.MODEL.DETECTOR3D.PETR.TRANSFORMER_NAME == 'PETR_TRANSFORMER':
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TRANSFORMER_NAME == 'PETR_TRANSFORMER':
             self.transformer.init_weights()
 
         nn.init.uniform_(self.reference_points.weight.data, 0, 1)
@@ -529,7 +529,7 @@ class PETR_HEAD(nn.Module):
     def create_frustum(self, img_shape_after_aug, feat_shape):
         ogfW, ogfH = img_shape_after_aug
         fW, fH = feat_shape
-        if self.cfg.MODEL.DETECTOR3D.PETR.LID_DEPTH:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LID_DEPTH:
             d_coords = self.d_coords.view(-1, 1, 1).expand(-1, fH, fW) # Left shape: (D, H, W)
         else:
             d_coords = torch.arange(*self.d_bound, dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # Left shape: (D, H, W)
@@ -580,7 +580,7 @@ class PETR_HEAD(nn.Module):
         cam_feat = depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)]  # Left shape: (B, C, H, W)
         geom_xyz = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy(), (img_mask.shape[2], img_mask.shape[1]))    # Left shape: (B, D, H, W, 3)
  
-        if self.cfg.MODEL.DETECTOR3D.PETR.LID:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LID:
             geom_xyz = geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)
             geom_xy = (geom_xyz[..., :2] / self.voxel_size[:2]).int()    # Left shape: (B, D, H, W, 2)
             geom_z = (geom_xyz[..., 2:].unsqueeze(-1) >= self.coor_z_coords.cuda().view(1, 1, 1, 1, 1, -1)).int().sum(-1) - 1   # Left shape: (B, D, H, W, 1)
@@ -598,8 +598,8 @@ class PETR_HEAD(nn.Module):
         geom_xyz = torch.cat((geom_xyz, BDHW_idx), dim = -1)    # Left shape: (B, D, H, W, 6). The first 3 numbers are voxel x, y, z. The remaning 3 numbers are b, d, hw.
         outrange_mask = (geom_xyz[..., 0] < 0) | (geom_xyz[..., 0] >= self.voxel_num[0]) | (geom_xyz[..., 1] < 0) | (geom_xyz[..., 1] >= self.voxel_num[1]) | (geom_xyz[..., 2] < 0) | (geom_xyz[..., 2] >= self.voxel_num[2])
         invalid_mask = img_mask.unsqueeze(1) | outrange_mask
-        if self.cfg.MODEL.DETECTOR3D.PETR.LLS_SPARSE > 0:
-            invalid_mask = invalid_mask | (depth < self.cfg.MODEL.DETECTOR3D.PETR.LLS_SPARSE) # Left shape: (B, D, H, W)
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LLS_SPARSE > 0:
+            invalid_mask = invalid_mask | (depth < self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LLS_SPARSE) # Left shape: (B, D, H, W)
         valid_mask = ~invalid_mask
         geom_xyz = geom_xyz[valid_mask]    # Left shape: (num_proj, 6)
         
@@ -626,7 +626,7 @@ class PETR_HEAD(nn.Module):
         query_embeds = self.query_embedding(pos2posemb3d(reference_points))   # Left shape: (B, num_query, L) 
         tgt = self.tgt_embed.weight[None].expand(B, -1, -1) # Left shape: (B, num_query, L)
 
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
             center_conf_pred = center_head_out['topk_center_conf'].detach()  # Left shape: (B, num_proposal, 1)
             topk_center_xyz = center_head_out['topk_center_xyz'].detach()    # Left shape: (B, num_proposal, 3)
             center_conf_emb = self.center_conf_emb(center_conf_pred)    # Left shape: (B, num_proposal, L)
@@ -646,7 +646,7 @@ class PETR_HEAD(nn.Module):
         outputs_classes = []
         outputs_regs = []
         for lvl in range(outs_dec.shape[0]):
-            if self.cfg.MODEL.DETECTOR3D.PETR.ITER_QUERY_UPDATE:
+            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.ITER_QUERY_UPDATE:
                 if lvl == 0:
                     reference = init_reference
                 else:
@@ -672,7 +672,7 @@ class PETR_HEAD(nn.Module):
             (self.position_range[1] - self.position_range[0]) + self.position_range[0]
         outputs_regs[..., self.reg_key_manager('loc')][..., 1] = outputs_regs[..., self.reg_key_manager('loc')][..., 1] * \
             (self.position_range[3] - self.position_range[2]) + self.position_range[2]
-        if self.cfg.MODEL.DETECTOR3D.PETR.LID:
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LID:
             pred_z = outputs_regs[..., self.reg_key_manager('loc')][..., 2].clone()
             pred_z = (pred_z * pred_z + pred_z) / 2 # Left shape: (num_dec, B, num_query)
             outputs_regs[..., self.reg_key_manager('loc')][..., 2] = pred_z * (self.position_range[5] - self.position_range[4]) + self.position_range[4]
@@ -704,19 +704,19 @@ class PETR_HEAD(nn.Module):
             bs_instance = Instances(image_size = (batched_inputs[bs]['height'], batched_inputs[bs]['width']))
         
             valid_mask = torch.ones_like(max_cls_scores[bs], dtype = torch.bool)
-            if self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.CONFIDENCE_2D_THRE > 0:
-                valid_mask = valid_mask & (max_cls_scores[bs] > self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.CONFIDENCE_2D_THRE)
-            if self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.CONFIDENCE_3D_THRE > 0:
-                valid_mask = valid_mask & (confs_3d[bs] > self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.CONFIDENCE_2D_THRE)
+            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.POST_PROCESS.CONFIDENCE_2D_THRE > 0:
+                valid_mask = valid_mask & (max_cls_scores[bs] > self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.POST_PROCESS.CONFIDENCE_2D_THRE)
+            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.POST_PROCESS.CONFIDENCE_3D_THRE > 0:
+                valid_mask = valid_mask & (confs_3d[bs] > self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.POST_PROCESS.CONFIDENCE_2D_THRE)
             bs_max_cls_scores = max_cls_scores[bs][valid_mask]
             bs_max_cls_idxs = max_cls_idxs[bs][valid_mask]
             bs_confs_3d = confs_3d[bs][valid_mask]
             bs_bbox_preds = bbox_preds[bs][valid_mask]
             
             # Prediction scores
-            if self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.OUTPUT_CONFIDENCE == '2D':
+            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.POST_PROCESS.OUTPUT_CONFIDENCE == '2D':
                 bs_scores = bs_max_cls_scores.clone()   # Left shape: (valid_query_num,)
-            elif self.cfg.MODEL.DETECTOR3D.PETR.POST_PROCESS.OUTPUT_CONFIDENCE == '3D':
+            elif self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.POST_PROCESS.OUTPUT_CONFIDENCE == '3D':
                 bs_scores = bs_confs_3d.clone()    # Left shape: (valid_query_num,)
             # Predicted classes
             bs_pred_classes = bs_max_cls_idxs.clone()
@@ -871,9 +871,9 @@ class PETR_HEAD(nn.Module):
             bs_valid_cls_gts_onehot = F.one_hot(bs_cls_gts, num_classes = self.total_cls_num) # Left shape: (num_gt, num_cls)
             bs_cls_gts_onehot[pred_idxs] = bs_valid_cls_gts_onehot
             cls_loss_matrix = torchvision.ops.sigmoid_focal_loss(bs_cls_scores, bs_cls_gts_onehot.float(), reduction = 'none')  # Left shape: (num_query, num_cls)
-            if self.cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_MASK > 0:
+            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_MASK > 0:
                 valid_cls_mask = self.datasets_cls_mask[batched_inputs[bs]['dataset_id']].cuda()    # Left shape: (num_cls,) 
-                cls_loss_matrix = cls_loss_matrix * valid_cls_mask[None] + self.cfg.MODEL.DETECTOR3D.PETR.HEAD.CLS_MASK * (cls_loss_matrix * ~valid_cls_mask[None])
+                cls_loss_matrix = cls_loss_matrix * valid_cls_mask[None] + self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_MASK * (cls_loss_matrix * ~valid_cls_mask[None])
             loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * cls_loss_matrix.sum()
             
             # Localization loss

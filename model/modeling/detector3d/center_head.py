@@ -20,12 +20,12 @@ class CENTER_HEAD(nn.Module):
         self.cfg = cfg
         self.in_channels = in_channels
 
-        self.proposal_number = cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.PROPOSAL_NUMBER
-        self.downsample_factor = self.cfg.MODEL.DETECTOR3D.PETR.DOWNSAMPLE_FACTOR
+        self.proposal_number = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.PROPOSAL_NUMBER
+        self.downsample_factor = self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.DOWNSAMPLE_FACTOR
         self.embed_dims = 256
-        self.obj_loss_weight = cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.OBJ_LOSS_WEIGHT
-        self.depth_loss_weight = cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.DEPTH_LOSS_WEIGHT
-        self.offset_loss_weight = cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.OFFSET_LOSS_WEIGHT
+        self.obj_loss_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.OBJ_LOSS_WEIGHT
+        self.depth_loss_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.DEPTH_LOSS_WEIGHT
+        self.offset_loss_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.OFFSET_LOSS_WEIGHT
 
         self.shared_conv = nn.Sequential(
             nn.Conv2d(in_channels, self.embed_dims, kernel_size=1, padding=1 // 2, bias=True),
@@ -61,8 +61,8 @@ class CENTER_HEAD(nn.Module):
         obj_pred = sigmoid_hm(self.obj_head(feat))  # Left shape: (B, 1, feat_h, feat_w)
         depth_pred = self.depth_head(feat)  # Left shape: (B, 1, feat_h, feat_w)
         depth_pred = 1 / depth_pred.sigmoid() - 1   # inv_sigmoid decoding
-        if self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.FOCAL_DECOUPLE:
-            virtual_focal_y = self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.VIRTUAL_FOCAL_Y
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.FOCAL_DECOUPLE:
+            virtual_focal_y = self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.VIRTUAL_FOCAL_Y
             real_focal_y = Ks[:, 1, 1]
             depth_pred = depth_pred * real_focal_y[:, None, None, None] / virtual_focal_y
         offset_pred = self.offset_head(feat)    # Left shape: (B, 2, feat_h, feat_w)
@@ -110,7 +110,7 @@ class CENTER_HEAD(nn.Module):
                 tgt_xyz_preds.append(tgt_3dcenter_xyz_pred)
         else:
             # During inference, we obtain proposal points by confidence filtering
-            valid_proposal_mask = (center_conf > self.cfg.MODEL.DETECTOR3D.PETR.CENTER_PROPOSAL.PROPOSAL_CONF_THRE).squeeze(-1) # Left shape: (B, valid_proposal_num)
+            valid_proposal_mask = (center_conf > self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.PROPOSAL_CONF_THRE).squeeze(-1) # Left shape: (B, valid_proposal_num)
             for bs_idx, bs_mask in enumerate(valid_proposal_mask):
                 bs_valid_center_conf = center_conf[bs_idx][bs_mask]
                 tgt_conf_preds.append(bs_valid_center_conf) # Left shape: (num_valid_proposal, 1)
