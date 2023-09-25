@@ -22,14 +22,12 @@ from detectron2.engine import (
     default_writers, 
     launch
 )
-from detectron2.solver import build_lr_scheduler as detectron_build_lr_scheduler
 from detectron2.utils.events import EventStorage
 from detectron2.utils.logger import setup_logger
 
 #torch.autograd.set_detect_anomaly(True)
 #os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
 logger = logging.getLogger("cubercnn")
-#torch.multiprocessing.set_sharing_strategy('file_system')
 
 warnings.filterwarnings("ignore")
 
@@ -37,9 +35,9 @@ sys.dont_write_bytecode = True
 sys.path.append(os.getcwd())
 np.set_printoptions(suppress=True)
 
-from cubercnn.solver import build_optimizer, freeze_bn, PeriodicCheckpointerOnlyOne, build_lr_scheduler
-from cubercnn.config import get_cfg_defaults
-from cubercnn.data import (
+from model.solver import build_optimizer, freeze_bn, PeriodicCheckpointerOnlyOne, build_lr_scheduler
+from model.config import get_cfg_defaults
+from model.data import (
     load_omni3d_json,
     DatasetMapper3D,
     build_detection_train_loader,
@@ -47,17 +45,14 @@ from cubercnn.data import (
     get_omni3d_categories,
     simple_register
 )
-from cubercnn.evaluation import (
+from model.evaluation import (
     Omni3DEvaluator, Omni3Deval,
     Omni3DEvaluationHelper,
     inference_on_dataset
 )
-from cubercnn.modeling.proposal_generator import RPNWithIgnore
-from cubercnn.modeling.roi_heads import ROIHeads3D
-from cubercnn.modeling.meta_arch import RCNN3D, build_model
-from cubercnn.modeling.backbone import build_dla_from_vision_fpn_backbone
-from cubercnn import util, vis, data
-import cubercnn.vis.logperf as utils_logperf
+
+from model.modeling.meta_arch import build_model
+from model import util, vis, data
 
 MAX_TRAINING_ATTEMPTS = 1
 
@@ -132,10 +127,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
     model.train()
 
     optimizer = build_optimizer(cfg, model)
-    if cfg.MODEL.GLIP_MODEL.MODEL.META_ARCHITECTURE == "GeneralizedRCNN":
-        scheduler = detectron_build_lr_scheduler(cfg, optimizer)
-    else:
-        scheduler = build_lr_scheduler(cfg, optimizer)
+    scheduler = build_lr_scheduler(cfg, optimizer)
     if cfg.SOLVER.LR_SCHEDULER_NAME == 'CosineAnnealing':
         scheduler, lr_warmup_scheduler = scheduler
 
@@ -182,7 +174,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
 
     GAMMA = 0.02            # rolling average weight gain
     recent_loss = None      # stores the most recent loss magnitude
-
+    
     data_iter = iter(data_loader)
 
     # model.parameters() is surprisingly expensive at 150ms, so cache it
@@ -385,8 +377,6 @@ def main(args):
     logger.info('Preprocessing Training Datasets')
     
     filter_settings = data.get_filter_settings_from_cfg(cfg)
-
-    priors = None
     
     if args.eval_only:
         category_path = os.path.join(util.file_parts(args.config_file)[0], 'category_meta.json')
@@ -394,13 +384,6 @@ def main(args):
         # store locally if needed
         if category_path.startswith(util.CubeRCNNHandler.PREFIX):
             category_path = util.CubeRCNNHandler._get_local_path(util.CubeRCNNHandler, category_path)
-        
-        '''metadata = util.load_json(category_path)
-        # register the categories
-        thing_classes = metadata['thing_classes']
-        id_map = {int(key):val for key, val in metadata['thing_dataset_id_to_contiguous_id'].items()}
-        MetadataCatalog.get('omni3d_model').thing_classes = thing_classes
-        MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id  = id_map'''
         data.register_and_store_model_metadata(None, cfg.OUTPUT_DIR, filter_settings)
 
         thing_classes = MetadataCatalog.get('omni3d_model').thing_classes
@@ -451,10 +434,6 @@ def main(args):
             logger.info('Available categories for {}'.format(info['name']))
             logger.info([thing_classes[i] for i in (possible_categories & known_category_training_ids)])
 
-        # compute priors given the training data.
-        #priors = util.compute_priors(cfg, datasets)    # Needed for Cube RCNN.
-        priors = None
-
     # This transformation process should only be performed for once.
     datasets_cls_dict = MetadataCatalog.get('omni3d_model').datasets_cls_dict
     for dataset_key in datasets_cls_dict.keys():
@@ -470,8 +449,8 @@ def main(args):
     while remaining_attempts > 0:
 
         # build the training model.
-        model = build_model(cfg, priors=priors).cuda()
-        
+        model = build_model(cfg,).cuda()
+
         if remaining_attempts == MAX_TRAINING_ATTEMPTS:
             # log the first attempt's settings.
             logger.info("Model:\n{}".format(model))

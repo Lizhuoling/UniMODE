@@ -1,4 +1,4 @@
-exp_id=TwoStage_baseline_omni3dtest
+exp_id=camera_omni3d_convnext
 
 #ulimit -n 65536
 

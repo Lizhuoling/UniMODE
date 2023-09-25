@@ -1,6 +1,0 @@
-_BASE_: "Base_Omni3D.yaml"
-MODEL:
-  BACKBONE:
-    NAME: 'build_dla_from_vision_fpn_backbone'
-  DLA:
-    TYPE: 'dla34'

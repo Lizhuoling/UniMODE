@@ -1,0 +1,95 @@
+_BASE_: "Base.yaml"
+
+DATASETS:
+  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'Objectron_train', 'Objectron_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
+  #TRAIN: ('SUNRGBD_val',)
+  TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
+  #TEST: ('SUNRGBD_val',)
+  CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
+  DATA_RATIO: 0.2
+
+INPUT:
+  RESIZE_TGT_SIZE: (640, 512)
+  RANDOM_FLIP: "none"
+  COLOR_AUG: True
+
+SOLVER:
+  IMS_PER_BATCH: 192
+  TYPE: "mmcv_AdamW"
+  BASE_LR: 12e-4
+  WEIGHT_DECAY: 1e-2
+  MAX_ITER: 23200
+  VIRTUAL_EPOCHS: 20
+  VIRTUAL_LOSS: 2.0   # To avoid the total loss is too small.
+
+  LR_SCHEDULER_NAME: "CosineAnnealing"
+  WARMUP_FACTOR: 0.3333
+  WARMUP_ITERS: 500
+  WARMUP_METHOD: "linear"
+
+  CLIP_GRADIENTS: 
+    ENABLED: True
+    CLIP_VALUE: 35.0
+    NORM_TYPE: 2.0
+
+TEST:
+  EVAL_PERIOD: 11600
+
+MODEL:
+  META_ARCHITECTURE: "Omni3DFormer"
+
+  DETECTOR3D:
+    DETECT_ARCHITECTURE: "petr"
+
+    PETR:
+      GRID_MASK: False
+
+      BACKBONE_NAME: 'VoVNet'
+      BACKBONE_FP16: False
+      NECK_NAME: 'SECONDFPN'
+      TRANSFORMER_NAME: 'DEFORMABLE_TRANSFORMER'
+      ITER_QUERY_UPDATE: False
+      TRANSFORMER_DROPOUT: 0.1
+      MATCHER_NAME: 'HungarianAssigner3D'
+      NUM_QUERY: 200
+      FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
+      DOWNSAMPLE_FACTOR: 16
+      LID: True
+      LID_DEPTH: False
+      LLS_SPARSE: 1e-3
+      NAIVE_DEPTH_HEAD: False
+
+      CENTER_PROPOSAL:
+        USE_CENTER_PROPOSAL: True
+        FOCAL_DECOUPLE: True
+        VIRTUAL_FOCAL_Y: 512.0
+        PROPOSAL_NUMBER: 100
+        OBJ_LOSS_WEIGHT: 1.0
+        DEPTH_LOSS_WEIGHT: 0.2
+        OFFSET_LOSS_WEIGHT: 1.0
+        PROPOSAL_CONF_THRE: 0.2
+
+      HEAD:
+        OV_CLS_HEAD: False
+        UNCERN_RANGE: [-10, 10]
+        CLS_WEIGHT: 2.0
+        LOC_WEIGHT: 0.25
+        DIM_WEIGHT: 0.25
+        POSE_WEIGHT: 0.25
+        DEPTH_HEAD_WEIGHT: 1.0
+        DET_2D_L1_WEIGHT: 5.0
+        DET_2D_GIOU_WEIGHT: 2.0
+
+        ENC_NUM: 1
+        DEC_NUM: 6
+
+        POSITION_RANGE: [-30, 30, -40, 40, 0, 80]
+        GRID_SIZE: [1, 80, 1]
+        D_BOUND: [0.1, 100, 1]
+        ENC_CAM_INTRINSIC: True 
+        CLS_MASK: 0.2
+
+      POST_PROCESS:
+        CONFIDENCE_2D_THRE: 0.0
+        CONFIDENCE_3D_THRE: -1.0
+        OUTPUT_CONFIDENCE: '3D'

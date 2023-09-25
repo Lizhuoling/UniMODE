@@ -1,18 +1,14 @@
-conda create --name omni3d -y python=3.8
+conda create --name mm-omni3d -y python=3.8
 
 pip install torch==1.9.0+cu111 torchvision==0.10.0+cu111 -f https://download.pytorch.org/whl/torch_stable.html
 
 pip install openmim
-#pip install mmcv==2.0.0 -f https://download.openmmlab.com/mmcv/dist/cu117/torch1.13/index.html
-#mim install mmdet   # 3.0.0
-#pip install "mmsegmentation>=1.0.0"
-#mim install "mmdet3d>=1.1.0rc0"
 pip install mmcv-full==1.7.0 -f https://download.openmmlab.com/mmcv/dist/cu111/torch1.9/index.html
 pip install mmdet==v2.28.2  
 pip install mmsegmentation==0.30.0
 pip install mmdet3d==v1.0.0rc4
 
-pip install cython opencv-python timm transformers einops ftfy opencv-python-headless tensorboardX tensorflow rope
+pip install cython opencv-python timm transformers einops ftfy opencv-python-headless tensorboardX tensorflow rope ninja
 pip install 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'
 
 apt-get autoremove nvidia-cuda-toolkit
@@ -32,14 +28,7 @@ rm -rf build
 pip install -e .
 cd ..
 
-#git clone https://github.com/HazyResearch/flash-attention.git
-#cd flash-attention
-#rm -rf build
-#python setup.py develop
-#cd ..
-
-rm -rf build
-python setup_maskrcnn_benchmark.py develop
+pip install flash-attn==0.2.2
 
 python setup_voxel_pooling.py develop
 
@@ -47,10 +36,6 @@ pip install setuptools==59.5.0
 pip install Pillow==8.2.0
 pip install numba==0.56.4
 
-cd cubercnn/deformable_ops
+cd model/deformable_ops
 python setup.py develop
 cd ../..
-
-
-#git clone https://github.com/facebookresearch/xformers.git
-#cd xformers

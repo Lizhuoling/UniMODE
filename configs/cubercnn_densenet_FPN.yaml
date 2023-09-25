@@ -1,4 +1,0 @@
-_BASE_: "Base_Omni3D.yaml"
-MODEL:
-  BACKBONE:
-    NAME: 'build_densenet_fpn_backbone'

@@ -1,3 +1,2 @@
-maskrcnn_benchmark
 tools
 voxel_pooling
