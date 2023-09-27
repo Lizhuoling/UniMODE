@@ -4,7 +4,7 @@ pip install torch==1.9.0+cu111 torchvision==0.10.0+cu111 -f https://download.pyt
 
 pip install openmim
 pip install mmcv-full==1.7.0 -f https://download.openmmlab.com/mmcv/dist/cu111/torch1.9/index.html
-pip install mmdet==v2.28.2  
+pip install mmdet==v2.28.2
 pip install mmsegmentation==0.30.0
 pip install mmdet3d==v1.0.0rc4
 
@@ -31,7 +31,7 @@ cd ..
 pip install flash-attn==0.2.2
 pip install spconv-cu114
 
-python setup_voxel_pooling.py develop
+#python setup_voxel_pooling.py develop
 
 pip install setuptools==59.5.0
 pip install Pillow==8.2.0
