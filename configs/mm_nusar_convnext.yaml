@@ -2,11 +2,12 @@ _BASE_: "Base.yaml"
 
 DATASETS:
   #TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'Objectron_train', 'Objectron_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
-  TRAIN: ('SUNRGBD_val',)
+  TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
   #TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
-  TEST: ('SUNRGBD_val',)
-  CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
-  DATA_RATIO: 0.2
+  TEST: ('nuScenes_test', 'ARKitScenes_test',)
+  #CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
+  CATEGORY_NAMES: ('machine', 'shelves', 'chair', 'car', 'table', 'sofa', 'bus', 'cabinet', 'toilet', 'motorcycle', 'bathtub', 'oven', 'sink', 'traffic cone', 'truck', 'television', 'refrigerator', 'pedestrian', 'stove', 'bicycle', 'trailer', 'barrier', 'bed')
+  DATA_RATIO: 1.0
 
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)
@@ -14,11 +15,11 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 4 #192
+  IMS_PER_BATCH: 128
   TYPE: "mmcv_AdamW"
-  BASE_LR: 12e-4
+  BASE_LR: 8e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 23200
+  MAX_ITER: 58000
   VIRTUAL_EPOCHS: 20
   VIRTUAL_LOSS: 2.0   # To avoid the total loss is too small.
 
@@ -49,6 +50,9 @@ MODEL:
       NECK_NAME: 'SECONDFPN'
       PTS_VOXEL_NAME: 'SPConvVoxelization'
       PTS_VOXEL_ENCODER: "HardSimpleVFE"
+      PTS_MIDDLE_ENCODER: "SparseEncoder"
+      PTS_BACKBONE: "SECOND"
+      PTS_NECK: "SECONDFPN"
       TRANSFORMER_NAME: 'DEFORMABLE_TRANSFORMER'
       ITER_QUERY_UPDATE: False
       TRANSFORMER_DROPOUT: 0.1
@@ -56,13 +60,11 @@ MODEL:
       NUM_QUERY: 200
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
       DOWNSAMPLE_FACTOR: 16
-      LID: True
-      LID_DEPTH: False
       LLS_SPARSE: 1e-3
       NAIVE_DEPTH_HEAD: False
 
       CENTER_PROPOSAL:
-        USE_CENTER_PROPOSAL: True
+        USE_CENTER_PROPOSAL: False
         FOCAL_DECOUPLE: True
         VIRTUAL_FOCAL_Y: 512.0
         PROPOSAL_NUMBER: 100
@@ -79,17 +81,14 @@ MODEL:
         DIM_WEIGHT: 0.25
         POSE_WEIGHT: 0.25
         DEPTH_HEAD_WEIGHT: 1.0
-        DET_2D_L1_WEIGHT: 5.0
-        DET_2D_GIOU_WEIGHT: 2.0
 
         ENC_NUM: 1
         DEC_NUM: 6
 
         POSITION_RANGE: [-30, 30, -40, 40, 0, 80]
-        GRID_SIZE: [1, 80, 1]
-        D_BOUND: [0.1, 100, 1]
+        GRID_SIZE: [1, 10, 1]
         ENC_CAM_INTRINSIC: True 
-        CLS_MASK: 0.2
+        CLS_MASK: -1.0
 
       POST_PROCESS:
         CONFIDENCE_2D_THRE: 0.0
