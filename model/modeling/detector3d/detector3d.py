@@ -84,6 +84,7 @@ class DETECTOR3D(BaseModule):
             detector3d_head_inchannel = self.img_backbone.embed_dim
 
         pts_voxel_layer_cfg = pts_voxel_layer_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_NAME, cfg)
+        self.pts_voxel_max_points = pts_voxel_layer_cfg['max_num_points']
         if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_NAME == 'SPConvVoxelization':
             self.pts_voxel_layer = SPConvVoxelization(**pts_voxel_layer_cfg)
 
@@ -131,7 +132,12 @@ class DETECTOR3D(BaseModule):
     def extract_point_feat(self, points):
         voxels, coors, num_points = [], [], []
         for res in points:
-            res_voxels, res_coors, res_num_points = self.pts_voxel_layer(res)
+            if res.shape[0] != 0:
+                res_voxels, res_coors, res_num_points = self.pts_voxel_layer(res)
+            else:
+                res_voxels = res.new_zeros((0, self.pts_voxel_max_points, 3), dtype = torch.float32)
+                res_coors = res.new_zeros((0, 3), dtype = torch.int32)
+                res_num_points = res.new_zeros((0,), dtype = torch.int32)
             voxels.append(res_voxels)
             coors.append(res_coors)
             num_points.append(res_num_points)
@@ -143,6 +149,7 @@ class DETECTOR3D(BaseModule):
             coor_pad = F.pad(coor, (1, 0), mode='constant', value=i)    # Pad batch size to the first dimension.
             coors_batch.append(coor_pad)
         coors = torch.cat(coors_batch, dim=0)
+
         voxel_features = self.pts_voxel_encoder(voxels, num_points, coors,)
         batch_size = coors[-1, 0] + 1
         pts_middle_feat = self.pts_middle_encoder(voxel_features, coors, batch_size)
