@@ -390,8 +390,6 @@ class DeformableTransformerDecoder(nn.Module):
                 tmp_y = tmp[..., 1:2]   # Left shape: (B, num_query, 1)
                 new_reference_points_xz = tmp_xz + inverse_sigmoid(reference_points_xz)
                 new_reference_points = torch.cat((new_reference_points_xz[..., :1], tmp_y, new_reference_points_xz[..., 1:]), dim = -1).sigmoid()
-                if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.ITER_QUERY_UPDATE:
-                    reference_points = new_reference_points.detach()
                 
             if self.return_intermediate:
                 intermediate.append(output)

@@ -32,7 +32,7 @@ class MultiModal_DualView_Attn(nn.Module):
             BasicBlock(self.out_ch, self.out_ch),
         )
 
-    def forward(self, cam_voxel_feat, point_feat):
+    def forward(self, cam_voxel_feat, point_feat, batched_inputs):
         '''
         Input:
             cam_voxel_feat shape: (B, cam_C, voxel_z, voxel_y, voxel_x)

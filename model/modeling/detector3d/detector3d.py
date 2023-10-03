@@ -131,13 +131,14 @@ class DETECTOR3D(BaseModule):
     @force_fp32()
     def extract_point_feat(self, points):
         voxels, coors, num_points = [], [], []
+
+        # Avoid empty point set.
+        for cnt, res in enumerate(points):
+            if res.shape[0] == 0:
+                points[cnt] = torch.zeros((1, 3), dtype = torch.float32).cuda()
+
         for res in points:
-            if res.shape[0] != 0:
-                res_voxels, res_coors, res_num_points = self.pts_voxel_layer(res)
-            else:
-                res_voxels = res.new_zeros((0, self.pts_voxel_max_points, 3), dtype = torch.float32)
-                res_coors = res.new_zeros((0, 3), dtype = torch.int32)
-                res_num_points = res.new_zeros((0,), dtype = torch.int32)
+            res_voxels, res_coors, res_num_points = self.pts_voxel_layer(res)
             voxels.append(res_voxels)
             coors.append(res_coors)
             num_points.append(res_num_points)
@@ -468,16 +469,6 @@ def transformer_cfgs(transformer_name, cfg):
             use_dab=False,
             cfg = cfg,
         ),
-        Point3DTRANSFORMER = dict(
-            d_model = 256,
-            nhead = 8,
-            num_decoder_layers = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.DEC_NUM,
-            dim_feedforward = 512,
-            dropout = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TRANSFORMER_DROPOUT,
-            activation = "relu",
-            return_intermediate_dec=True,
-            cfg = cfg,
-        ),
     )
 
     return cfgs[transformer_name]
@@ -643,7 +634,7 @@ class DETECTOR3D_HEAD(nn.Module):
         norm_cam_coor = norm_cam_coor.view(B, voxel_z * voxel_y * voxel_x, 1, 2)
         cam_voxel_feat = F.grid_sample(input = cam_feat, grid = norm_cam_coor, padding_mode = 'zeros')  # Left shape: (B, C, voxel_z * voxel_y * voxel_x, 1)
         cam_voxel_feat = cam_voxel_feat.view(B, -1, voxel_z, voxel_y, voxel_x)  # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
-        bev_feat = self.mm_dv_attn(cam_voxel_feat, point_feat)
+        bev_feat = self.mm_dv_attn(cam_voxel_feat, point_feat, batched_inputs)
         
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
         bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
@@ -683,14 +674,7 @@ class DETECTOR3D_HEAD(nn.Module):
         outputs_classes = []
         outputs_regs = []
         for lvl in range(outs_dec.shape[0]):
-            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.ITER_QUERY_UPDATE:
-                if lvl == 0:
-                    reference = init_reference
-                else:
-                    reference = inter_references[lvl - 1]
-            else:
-                reference = init_reference
-            reference = inverse_sigmoid(reference)
+            reference = inverse_sigmoid(init_reference.clone())
 
             dec_cls_emb = self.cls_branches[lvl](outs_dec[lvl]) # Left shape: (B, num_query, emb_len) or (B, num_query, cls_num)
             dec_reg_result = self.reg_branches[lvl](outs_dec[lvl])  # Left shape: (B, num_query, reg_total_len)
