@@ -6,7 +6,6 @@ import datetime
 import io
 import itertools
 import json
-import logging
 import os
 import time
 from collections import defaultdict
@@ -321,7 +320,7 @@ class Omni3DEvaluationHelper:
                     self.evals_per_cat_area3D[key] = []
                 self.evals_per_cat_area3D[key] += item
 
-            logger.info('\n'+results['log_str_3D'].replace('mode=3D', '{} iter={} mode=3D'.format(dataset_name, self.iter_label)))
+            logging.info('\n'+results['log_str_3D'].replace('mode=3D', '{} iter={} mode=3D'.format(dataset_name, self.iter_label)))
 
         # full model category names
         category_names = self.filter_settings['category_names']

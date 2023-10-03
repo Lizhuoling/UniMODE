@@ -1,4 +1,4 @@
-exp_id=mm_nusar_convnext
+exp_id=mm_tinyomni3d_convnext
 
 #ulimit -n 65536
 

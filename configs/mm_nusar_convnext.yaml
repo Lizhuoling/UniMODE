@@ -1,11 +1,10 @@
 _BASE_: "Base.yaml"
 
 DATASETS:
-  #TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'Objectron_train', 'Objectron_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
   TRAIN: ('nuScenes_train', 'nuScenes_val', 'ARKitScenes_train', 'ARKitScenes_val')
-  #TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
+  #TRAIN: ('SUNRGBD_test',)
   TEST: ('nuScenes_test', 'ARKitScenes_test',)
-  #CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
+  #TEST: ('SUNRGBD_test',)
   CATEGORY_NAMES: ('machine', 'shelves', 'chair', 'car', 'table', 'sofa', 'bus', 'cabinet', 'toilet', 'motorcycle', 'bathtub', 'oven', 'sink', 'traffic cone', 'truck', 'television', 'refrigerator', 'pedestrian', 'stove', 'bicycle', 'trailer', 'barrier', 'bed')
   DATA_RATIO: 1.0
 
@@ -21,7 +20,7 @@ SOLVER:
   WEIGHT_DECAY: 1e-2
   MAX_ITER: 58000
   VIRTUAL_EPOCHS: 20
-  VIRTUAL_LOSS: 2.0   # To avoid the total loss is too small.
+  VIRTUAL_LOSS: 5.0   # To avoid the total loss is too small.
 
   LR_SCHEDULER_NAME: "CosineAnnealing"
   WARMUP_FACTOR: 0.3333
@@ -74,7 +73,6 @@ MODEL:
         PROPOSAL_CONF_THRE: 0.2
 
       HEAD:
-        OV_CLS_HEAD: False
         UNCERN_RANGE: [-10, 10]
         CLS_WEIGHT: 2.0
         LOC_WEIGHT: 0.25
@@ -88,7 +86,6 @@ MODEL:
         POSITION_RANGE: [-30, 30, -40, 40, 0, 80]
         GRID_SIZE: [1, 10, 1]
         ENC_CAM_INTRINSIC: True 
-        CLS_MASK: -1.0
 
       POST_PROCESS:
         CONFIDENCE_2D_THRE: 0.0

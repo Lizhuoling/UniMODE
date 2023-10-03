@@ -493,15 +493,6 @@ class DETECTOR3D_HEAD(nn.Module):
         self.cfg = cfg
         self.in_channels = in_channels
 
-        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_MASK > 0:
-            datasets_cls_dict = MetadataCatalog.get('omni3d_model').datasets_cls_dict
-            total_cls_num = len(MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id)
-            self.datasets_cls_mask = {}
-            for dataset_id in datasets_cls_dict.keys():
-                cls_mask = torch.zeros((total_cls_num,), dtype = torch.bool)
-                cls_mask[datasets_cls_dict[dataset_id]] = True
-                self.datasets_cls_mask[dataset_id] = cls_mask
-
         assert len(set(cfg.DATASETS.CATEGORY_NAMES)) == len(cfg.DATASETS.CATEGORY_NAMES)
         self.total_cls_num = len(cfg.DATASETS.CATEGORY_NAMES)
         self.num_query = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.NUM_QUERY
@@ -905,9 +896,6 @@ class DETECTOR3D_HEAD(nn.Module):
             bs_valid_cls_gts_onehot = F.one_hot(bs_cls_gts, num_classes = self.total_cls_num) # Left shape: (num_gt, num_cls)
             bs_cls_gts_onehot[pred_idxs] = bs_valid_cls_gts_onehot
             cls_loss_matrix = torchvision.ops.sigmoid_focal_loss(bs_cls_scores, bs_cls_gts_onehot.float(), reduction = 'none')  # Left shape: (num_query, num_cls)
-            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_MASK > 0:
-                valid_cls_mask = self.datasets_cls_mask[batched_inputs[bs]['dataset_id']].cuda()    # Left shape: (num_cls,) 
-                cls_loss_matrix = cls_loss_matrix * valid_cls_mask[None] + self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_MASK * (cls_loss_matrix * ~valid_cls_mask[None])
             loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * cls_loss_matrix.sum()
             
             # Localization loss

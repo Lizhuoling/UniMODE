@@ -70,7 +70,6 @@ MODEL:
         PROPOSAL_CONF_THRE: 0.2
 
       HEAD:
-        OV_CLS_HEAD: False
         UNCERN_RANGE: [-10, 10]
         CLS_WEIGHT: 2.0
         LOC_WEIGHT: 0.25
@@ -87,7 +86,6 @@ MODEL:
         GRID_SIZE: [1, 80, 1]
         D_BOUND: [0.1, 100, 1]
         ENC_CAM_INTRINSIC: True 
-        CLS_MASK: 0.2
 
       POST_PROCESS:
         CONFIDENCE_2D_THRE: 0.0

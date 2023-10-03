@@ -27,7 +27,7 @@ from detectron2.utils.logger import setup_logger
 
 #torch.autograd.set_detect_anomaly(True)
 #os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
-logger = logging.getLogger("cubercnn")
+logger = logging.getLogger('mm-omni3d')
 
 warnings.filterwarnings("ignore")
 
@@ -66,7 +66,6 @@ def do_test(cfg, model, iteration='final', storage=None):
     filter_settings['max_depth'] = 1e8
 
     dataset_names_test = cfg.DATASETS.TEST
-    only_2d = cfg.MODEL.ROI_CUBE_HEAD.LOSS_W_3D == 0.0
     output_folder = os.path.join(cfg.OUTPUT_DIR, "inference", 'iter_{}'.format(iteration))
     
     eval_helper = Omni3DEvaluationHelper(
@@ -74,7 +73,7 @@ def do_test(cfg, model, iteration='final', storage=None):
         filter_settings, 
         output_folder, 
         iter_label=iteration,
-        only_2d=only_2d,
+        only_2d=False,
     )
 
     for dataset_name in dataset_names_test:
@@ -354,7 +353,7 @@ def setup(args):
     cfg.freeze()
     default_setup(cfg, args)
 
-    setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="cubercnn")
+    setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="model")
     
     filter_settings = data.get_filter_settings_from_cfg(cfg)
 
@@ -433,12 +432,6 @@ def main(args):
             # log the per-dataset categories
             logger.info('Available categories for {}'.format(info['name']))
             logger.info([thing_classes[i] for i in (possible_categories & known_category_training_ids)])
-
-    # This transformation process should only be performed for once.
-    datasets_cls_dict = MetadataCatalog.get('omni3d_model').datasets_cls_dict
-    for dataset_key in datasets_cls_dict.keys():
-        datasets_cls_dict[dataset_key] = [dataset_id_to_contiguous_id[ele] for ele in datasets_cls_dict[dataset_key]]
-    MetadataCatalog.get('omni3d_model').datasets_cls_dict = datasets_cls_dict
     
     '''
     The training loops can attempt to train for N times.

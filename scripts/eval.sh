@@ -1,4 +1,4 @@
-exp_id=TwoStage_base2_nusar_newlss
+exp_id=mm_nusar_convnext
 
 CUDA_VISIBLE_DEVICES=3 python tools/train_net.py \
   --eval-only \
