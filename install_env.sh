@@ -29,7 +29,7 @@ pip install -e .
 cd ..
 
 pip install flash-attn==0.2.2
-pip install spconv-cu114
+pip install spconv-cu117
 
 #python setup_voxel_pooling.py develop
 

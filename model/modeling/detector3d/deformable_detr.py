@@ -45,7 +45,6 @@ class DeformableTransformer(nn.Module):
         self.nhead = nhead
         self.two_stage = two_stage
         self.two_stage_num_proposals = two_stage_num_proposals
-        self.use_dab = use_dab
 
         encoder_layer = DeformableTransformerEncoderLayer(d_model, dim_feedforward, dropout, activation,
                                                         num_feature_levels, nhead, enc_n_points, cfg = cfg)
@@ -59,8 +58,6 @@ class DeformableTransformer(nn.Module):
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
 
         self.high_dim_query_update = high_dim_query_update
-        if high_dim_query_update:
-            assert not self.use_dab, "use_dab must be True"
 
         self._reset_parameters()
 
@@ -136,29 +133,17 @@ class DeformableTransformer(nn.Module):
         
         # prepare input for decoder
         bs, _, c = memory.shape
-        if self.use_dab:
-            raise Exception("dab is not allowed.")
-            reference_points = query_embed[..., self.d_model:].sigmoid() 
-            tgt = query_embed[..., :self.d_model]
-            tgt = tgt.unsqueeze(0).expand(bs, -1, -1)
-            init_reference_out = reference_points
-        else:
-            query_embed, tgt = torch.split(query_embed, c, dim=2)   # query_embed shape: (bs, num_query, 2), tgt shape: (bs, num_query, 2)
-            init_reference_out = reference_points.clone()   # Left shape: (bs, num_query, 3)
+
+        query_embed, tgt = torch.split(query_embed, c, dim=2)   # query_embed shape: (bs, num_query, 2), tgt shape: (bs, num_query, 2)
 
         # decoder
         hs, inter_references = self.decoder(tgt, reference_points, memory,
                                             spatial_shapes, level_start_index, valid_ratios, 
-                                            query_pos=query_embed if not self.use_dab else None, 
+                                            query_pos=query_embed, 
                                             src_padding_mask=mask_flatten, reg_branches = reg_branches, reg_key_manager = reg_key_manager, 
                                             ori_img_resolution = ori_img_resolution)
-
-        inter_references_out = inter_references
-
-        if self.two_stage:
-            return hs, init_reference_out, inter_references_out, enc_outputs_class, enc_outputs_coord_unact
         
-        return hs, init_reference_out, inter_references_out, None, None # hs shape: (num_dec, bs, num_query, L), inter_references_out shape: (num_dec, bs, num_query, 2)
+        return hs   # hs shape: (num_dec, bs, num_query, L)
 
 class DeformableTransformerEncoderLayer(nn.Module):
     def __init__(self, d_model=256, d_ffn=1024, dropout=0.1, activation="relu",
@@ -355,7 +340,6 @@ class DeformableTransformerDecoder(nn.Module):
         self.num_layers = num_layers
         self.return_intermediate = return_intermediate
         # hack implementation for iterative bounding box refinement and two-stage Deformable DETR
-        self.use_dab = use_dab
         self.d_model = d_model
         self.no_sine_embed = no_sine_embed
 
@@ -367,8 +351,6 @@ class DeformableTransformerDecoder(nn.Module):
     def forward(self, tgt, reference_points, src, src_spatial_shapes, src_level_start_index, src_valid_ratios,
                 query_pos=None, src_padding_mask=None, reg_branches = None, reg_key_manager = None, ori_img_resolution = None,):
         output = tgt
-        if self.use_dab:
-            assert query_pos is None
         bs = src.shape[0]
         
         intermediate = []

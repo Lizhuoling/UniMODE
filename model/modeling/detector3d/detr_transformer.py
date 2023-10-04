@@ -11,7 +11,7 @@ import copy
 import warnings
 import pdb
 from typing import Optional, List
-#from .attention import FlashMHA
+from .attention import FlashMHA
 
 import torch
 import torch.nn.functional as F
@@ -29,12 +29,12 @@ class Transformer(nn.Module):
         super().__init__()
 
         encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward,
-                                                dropout, activation, normalize_before)
+                                                dropout, activation, normalize_before, use_flash_attn = True)
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
         self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
-                                                dropout, activation, normalize_before)
+                                                dropout, activation, normalize_before, use_flash_attn = True)
         decoder_norm = nn.LayerNorm(d_model)
         self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm,
                                           return_intermediate=return_intermediate_dec)
@@ -44,50 +44,31 @@ class Transformer(nn.Module):
         self.d_model = d_model
         self.nhead = nhead
         self.cfg = cfg
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.GLIP_FEAT_FUSION in ('language', 'VL'):
-            self.glip_text_decoderlayer = TransformerDecoderLayer(d_model = d_model, nhead = 8)
 
     def _reset_parameters(self):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, mask, query_embed, pos_embed, reg_branch=None, batched_inputs = None, glip_visual_feat = None, glip_pos_embed = None, glip_text_feat = None):
+    def forward(self, srcs, masks, pos_embeds, query_embed, reg_branches=None, **kwargs):
+        assert len(srcs) == 1
+        src = srcs[0]
+        pos_embed = pos_embeds[0]
+        mask = masks[0]
+
         # flatten NxCxHxW to HWxNxC
         bs, c, h, w = src.shape
         src = src.flatten(2).permute(2, 0, 1)   # [bs, c, h, w] -> [h*w, bs, c]
         pos_embed = pos_embed.flatten(2).permute(2, 0, 1)   # [bs, c, h, w] -> [h*w, bs, c]
         query_embed = query_embed.permute(1, 0, 2)   # [bs, num_query, dim] -> [num_query, bs, dim]
+        query_embed, tgt = torch.split(query_embed, c, dim=2)   # query_embed shape: (bs, num_query, 2), tgt shape: (bs, num_query, 2)
         mask = mask.flatten(1)
-        tgt = torch.zeros_like(query_embed)
-
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.GLIP_FEAT_FUSION in ('vision', 'VL'):
-            _, _, glip_visual_h, glip_visual_w = glip_visual_feat.shape
-            glip_visual_feat = glip_visual_feat.permute(2, 3, 0, 1).reshape(-1, bs, c)
-            glip_pos_embed = glip_pos_embed.permute(2, 3, 0, 1).reshape(-1, bs, c)
-            glip_visual_mask = mask.new_zeros((bs, glip_visual_h * glip_visual_w))
-            src = torch.cat((src, glip_visual_feat), dim  = 0)    # Left shape: (L, B, C)
-            pos_embed = torch.cat((pos_embed, glip_pos_embed), dim = 0) # Left shape: (L, B, C)
-            mask = torch.cat((mask, glip_visual_mask), dim = 1) # Left shape: (B, L)
-
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TEXT_FUSION_POSITION == 'before':
-            prev_decs, last_dec = out_dec[:-1], out_dec[-1] # prev_decs shape: (num_dec - 1, L, B, C), last_dec shape: (L, B, C)
-            last_dec = self.glip_text_decoderlayer(last_dec, glip_text_feat, query_pos = query_embed)
-            out_dec = torch.cat((prev_decs, last_dec[None]), dim  = 0)  # Left shape: (num_dec, L, B, C)
 
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
-        hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
-                          pos=pos_embed, query_pos=query_embed)
-
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.GLIP_FEAT_FUSION in ('language', 'VL') and self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TEXT_FUSION_POSITION == 'after':
-            prev_decs, last_dec = hs[:-1], hs[-1] # prev_decs shape: (num_dec - 1, L, B, C), last_dec shape: (L, B, C)
-            last_dec = self.glip_text_decoderlayer(last_dec, glip_text_feat, query_pos = query_embed)
-            hs = torch.cat((prev_decs, last_dec[None]), dim  = 0)  # Left shape: (num_dec, L, B, C)
-
+        hs = self.decoder(tgt, memory, memory_key_padding_mask=mask, pos=pos_embed, query_pos=query_embed)
         hs = hs.transpose(1, 2)
-        #memory = memory.permute(1, 2, 0).view(bs, c, h, w)
-        
-        return hs, None
+
+        return hs
 
 
 class TransformerEncoder(nn.Module):

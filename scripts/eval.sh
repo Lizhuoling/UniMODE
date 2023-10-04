@@ -1,4 +1,4 @@
-exp_id=mm_nusar_convnext
+exp_id=mm_tinyomni3d_convnext_global
 
 CUDA_VISIBLE_DEVICES=3 python tools/train_net.py \
   --eval-only \

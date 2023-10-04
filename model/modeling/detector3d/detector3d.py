@@ -546,8 +546,8 @@ class DETECTOR3D_HEAD(nn.Module):
         if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TRANSFORMER_NAME == 'DETR_TRANSFORMER':
             self.transformer = build_detr_transformer(**transformer_cfg)
         elif cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.TRANSFORMER_NAME == 'DEFORMABLE_TRANSFORMER':
-            self.tgt_embed = nn.Embedding(self.num_query, self.embed_dims)
             self.transformer = build_deformable_transformer(**transformer_cfg)
+        self.tgt_embed = nn.Embedding(self.num_query, self.embed_dims)
         self.num_decoder = 6    # Keep this variable consistent with the detr configs.
         
         # Classification head
@@ -665,7 +665,8 @@ class DETECTOR3D_HEAD(nn.Module):
 
         query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
         
-        outs_dec, init_reference, inter_references, _, _ = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
+
+        outs_dec = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
             reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
 
         
@@ -674,7 +675,7 @@ class DETECTOR3D_HEAD(nn.Module):
         outputs_classes = []
         outputs_regs = []
         for lvl in range(outs_dec.shape[0]):
-            reference = inverse_sigmoid(init_reference.clone())
+            reference = inverse_sigmoid(reference_points.clone())
 
             dec_cls_emb = self.cls_branches[lvl](outs_dec[lvl]) # Left shape: (B, num_query, emb_len) or (B, num_query, cls_num)
             dec_reg_result = self.reg_branches[lvl](outs_dec[lvl])  # Left shape: (B, num_query, reg_total_len)

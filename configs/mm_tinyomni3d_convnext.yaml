@@ -3,8 +3,8 @@ _BASE_: "Base.yaml"
 DATASETS:
   TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'Objectron_train', 'Objectron_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
   #TRAIN: ('Objectron_val',)
-  TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
-  #TEST: ('Objectron_val',)
+  #TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
+  TEST: ('SUNRGBD_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
   CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
   DATA_RATIO: 0.2
 
