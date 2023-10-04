@@ -1,10 +1,10 @@
-exp_id=mm_tinyomni3d_convnext
+exp_id=mm_tinyomni3d_convnext_global
 
 #ulimit -n 65536
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/train_net.py \
+CUDA_VISIBLE_DEVICES=2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
-  --num-gpus 4 \
+  --num-gpus 2 \
   --num-machines 1 \
   --machine-rank 0 \
   --resume \
