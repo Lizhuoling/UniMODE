@@ -6,7 +6,7 @@ DATASETS:
   TEST: ('SUNRGBD_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
   #TEST: ('SUNRGBD_val',)
   CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
-  DATA_RATIO: 0.2
+  DATA_RATIO: 1.0
 
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)
@@ -14,11 +14,11 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 128
+  IMS_PER_BATCH: 256
   TYPE: "mmcv_AdamW"
-  BASE_LR: 8e-4
+  BASE_LR: 16e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 34800
+  MAX_ITER: 87000
   VIRTUAL_EPOCHS: 20
   VIRTUAL_LOSS: 5.0   # To avoid the total loss is too small.
 
@@ -33,7 +33,7 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 8700
+  EVAL_PERIOD: 21750
 
 MODEL:
   META_ARCHITECTURE: "Omni3DFormer"
