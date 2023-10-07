@@ -60,54 +60,49 @@ class DETECTOR3D(BaseModule):
         else:
             self.grid_mask = False
 
-        backbone_cfg = backbone_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME, cfg)
-        if 'EVA' in cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME:
-            assert len(cfg.INPUT.RESIZE_TGT_SIZE) == 2
-            assert cfg.INPUT.RESIZE_TGT_SIZE[0] == cfg.INPUT.RESIZE_TGT_SIZE[1]
-            backbone_cfg['img_size'] = cfg.INPUT.RESIZE_TGT_SIZE[0]
-        
-        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME == 'DLA34':
-            self.img_backbone = DLABackbone(**backbone_cfg)
-        else:
-            self.img_backbone = build_backbone(backbone_cfg)
-            self.img_backbone.init_weights()
-
-        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.USE_NECK:
-            neck_cfg = neck_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.NECK_NAME, cfg)
-            if neck_cfg['type'] == 'SECONDFPN':
-                self.img_neck = mmdet3d_build_neck(neck_cfg)
-                detector3d_head_inchannel = sum(neck_cfg['out_channels'])
+        if self.cfg.INPUT.INPUT_MODALITY in ['multi-modal', 'camera']:
+            backbone_cfg = backbone_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME, cfg)
+            if 'EVA' in cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME:
+                assert len(cfg.INPUT.RESIZE_TGT_SIZE) == 2
+                assert cfg.INPUT.RESIZE_TGT_SIZE[0] == cfg.INPUT.RESIZE_TGT_SIZE[1]
+                backbone_cfg['img_size'] = cfg.INPUT.RESIZE_TGT_SIZE[0]
+            
+            if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME == 'DLA34':
+                self.img_backbone = DLABackbone(**backbone_cfg)
             else:
-                self.img_neck = mmdet_build_neck(neck_cfg)
-                detector3d_head_inchannel = neck_cfg['out_channels']
-        else:
-            detector3d_head_inchannel = self.img_backbone.embed_dim
+                self.img_backbone = build_backbone(backbone_cfg)
+                self.img_backbone.init_weights()
 
-        pts_voxel_layer_cfg = pts_voxel_layer_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_NAME, cfg)
-        self.pts_voxel_max_points = pts_voxel_layer_cfg['max_num_points']
-        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_NAME == 'SPConvVoxelization':
-            self.pts_voxel_layer = SPConvVoxelization(**pts_voxel_layer_cfg)
+            if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.USE_NECK:
+                neck_cfg = neck_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.NECK_NAME, cfg)
+                if neck_cfg['type'] == 'SECONDFPN':
+                    self.img_neck = mmdet3d_build_neck(neck_cfg)
+                else:
+                    self.img_neck = mmdet_build_neck(neck_cfg)
 
-        pts_voxel_enc_cfg = pts_voxel_encoders_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_ENCODER, cfg)
-        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_ENCODER == 'HardSimpleVFE':
-            self.pts_voxel_encoder = mmdet3d_builder.build_voxel_encoder(pts_voxel_enc_cfg)
+        if self.cfg.INPUT.INPUT_MODALITY in ['multi-modal', 'point']:
+            pts_voxel_layer_cfg = pts_voxel_layer_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_NAME, cfg)
+            self.pts_voxel_max_points = pts_voxel_layer_cfg['max_num_points']
+            if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_NAME == 'SPConvVoxelization':
+                self.pts_voxel_layer = SPConvVoxelization(**pts_voxel_layer_cfg)
 
-        pts_middle_enc_cfg = pts_middle_encoders_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_MIDDLE_ENCODER, cfg)
-        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_MIDDLE_ENCODER == 'SparseEncoder':
-            self.pts_middle_encoder = mmdet3d_builder.build_middle_encoder(pts_middle_enc_cfg)
+            pts_voxel_enc_cfg = pts_voxel_encoders_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_ENCODER, cfg)
+            if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_VOXEL_ENCODER == 'HardSimpleVFE':
+                self.pts_voxel_encoder = mmdet3d_builder.build_voxel_encoder(pts_voxel_enc_cfg)
 
-        pts_backbone_cfg = pts_backbone_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_BACKBONE, cfg)
-        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_BACKBONE == 'SECOND':
-            self.pts_backbone = mmdet3d_builder.build_backbone(pts_backbone_cfg)
+            pts_middle_enc_cfg = pts_middle_encoders_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_MIDDLE_ENCODER, cfg)
+            if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_MIDDLE_ENCODER == 'SparseEncoder':
+                self.pts_middle_encoder = mmdet3d_builder.build_middle_encoder(pts_middle_enc_cfg)
 
-        pts_neck_cfg = pts_neck_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_NECK, cfg)
-        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_NECK == 'SECONDFPN':
-            self.pts_neck = mmdet3d_builder.build_neck(pts_neck_cfg)
+            pts_backbone_cfg = pts_backbone_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_BACKBONE, cfg)
+            if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_BACKBONE == 'SECOND':
+                self.pts_backbone = mmdet3d_builder.build_backbone(pts_backbone_cfg)
 
-        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-            self.center_head = CENTER_HEAD(cfg, in_channels = detector3d_head_inchannel)
+            pts_neck_cfg = pts_neck_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_NECK, cfg)
+            if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_NECK == 'SECONDFPN':
+                self.pts_neck = mmdet3d_builder.build_neck(pts_neck_cfg)
         
-        self.detector3d_head = DETECTOR3D_HEAD(cfg, in_channels = detector3d_head_inchannel)
+        self.detector3d_head = DETECTOR3D_HEAD(cfg,)
 
     @auto_fp16(apply_to=('imgs'), out_fp32=True)
     def extract_cam_feat(self, imgs, batched_inputs):
@@ -189,8 +184,14 @@ class DETECTOR3D(BaseModule):
         print("Whether flip: {}".format(batched_inputs[batch_id]['horizontal_flip_flag']))
         pdb.set_trace()'''
         
-        cam_feat = self.extract_cam_feat(imgs = images.tensor, batched_inputs = batched_inputs) # (B, C, feat_h, feat_w)
-        point_feat = self.extract_point_feat(points = points)   # Left shape: (B, C, bev_z, bev_x)
+        if self.cfg.INPUT.INPUT_MODALITY in ['multi-modal', 'camera']:
+            cam_feat = self.extract_cam_feat(imgs = images.tensor, batched_inputs = batched_inputs) # (B, C, feat_h, feat_w)
+        else:
+            cam_feat = None
+        if self.cfg.INPUT.INPUT_MODALITY in ['multi-modal', 'point']:
+            point_feat = self.extract_point_feat(points = points)   # Left shape: (B, C, bev_z, bev_x)
+        else:
+            point_feat = None
 
         if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
             center_head_out = self.center_head(cam_feat, Ks, batched_inputs)
@@ -486,10 +487,9 @@ def matcher_cfgs(matcher_name, cfg):
 
 
 class DETECTOR3D_HEAD(nn.Module):
-    def __init__(self, cfg, in_channels):
+    def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.in_channels = in_channels
 
         assert len(set(cfg.DATASETS.CATEGORY_NAMES)) == len(cfg.DATASETS.CATEGORY_NAMES)
         self.total_cls_num = len(cfg.DATASETS.CATEGORY_NAMES)
@@ -515,7 +515,13 @@ class DETECTOR3D_HEAD(nn.Module):
 
         self.register_buffer('voxel_coor', self.create_voxel_coor())
 
-        self.mm_dv_attn = MultiModal_DualView_Attn(cfg, img_in_ch = 512, point_in_ch = 512, voxel_num = [int((row[1] - row[0]) / row[2]) for row in [self.x_bound, self.y_bound, self.z_bound]], out_ch = self.embed_dims)
+        if self.cfg.INPUT.INPUT_MODALITY == 'multi-modal':
+            self.mm_dv_attn = MultiModal_DualView_Attn(cfg, img_in_ch = 512, point_in_ch = 512, voxel_num = [int((row[1] - row[0]) / row[2]) for row in \
+                [self.x_bound, self.y_bound, self.z_bound]], out_ch = self.embed_dims)
+        elif self.cfg.INPUT.INPUT_MODALITY == 'camera':
+            self.dim_transform = nn.Conv2d(512, self.embed_dims, kernel_size=1, stride=1, padding=0)
+        elif self.cfg.INPUT.INPUT_MODALITY == 'point':
+            self.dim_transform = nn.Conv2d(512, self.embed_dims, kernel_size=1, stride=1, padding=0)
         
         self.pos2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
         self.bev_pos2d_encoder = nn.Sequential(
@@ -626,15 +632,28 @@ class DETECTOR3D_HEAD(nn.Module):
         return cam_uv_coor
 
     def forward(self, cam_feat, point_feat, Ks, scale_ratios, img_mask, batched_inputs, ori_img_resolution, center_head_out = None):
-        B = cam_feat.shape[0]
-        img_mask = F.interpolate(img_mask[None], size=cam_feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
+        if cam_feat != None:
+            B = cam_feat.shape[0]
+        else:
+            B = point_feat.shape[0]
 
-        norm_cam_coor = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy())    # Left shape: (B, voxel_z, voxel_y, voxel_x, 2)
-        _, voxel_z, voxel_y, voxel_x, _ = norm_cam_coor.shape
-        norm_cam_coor = norm_cam_coor.view(B, voxel_z * voxel_y * voxel_x, 1, 2)
-        cam_voxel_feat = F.grid_sample(input = cam_feat, grid = norm_cam_coor, padding_mode = 'zeros')  # Left shape: (B, C, voxel_z * voxel_y * voxel_x, 1)
-        cam_voxel_feat = cam_voxel_feat.view(B, -1, voxel_z, voxel_y, voxel_x)  # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
-        bev_feat = self.mm_dv_attn(cam_voxel_feat, point_feat, batched_inputs)
+        if self.cfg.INPUT.INPUT_MODALITY == 'multi-modal':
+            norm_cam_coor = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy())    # Left shape: (B, voxel_z, voxel_y, voxel_x, 2)
+            _, voxel_z, voxel_y, voxel_x, _ = norm_cam_coor.shape
+            norm_cam_coor = norm_cam_coor.view(B, voxel_z * voxel_y * voxel_x, 1, 2)
+            cam_voxel_feat = F.grid_sample(input = cam_feat, grid = norm_cam_coor, padding_mode = 'zeros')  # Left shape: (B, C, voxel_z * voxel_y * voxel_x, 1)
+            cam_voxel_feat = cam_voxel_feat.view(B, -1, voxel_z, voxel_y, voxel_x)  # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
+            bev_feat = self.mm_dv_attn(cam_voxel_feat, point_feat, batched_inputs)
+        elif self.cfg.INPUT.INPUT_MODALITY == 'camera':
+            norm_cam_coor = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy())    # Left shape: (B, voxel_z, voxel_y, voxel_x, 2)
+            _, voxel_z, voxel_y, voxel_x, _ = norm_cam_coor.shape
+            norm_cam_coor = norm_cam_coor.view(B, voxel_z * voxel_y * voxel_x, 1, 2)
+            cam_voxel_feat = F.grid_sample(input = cam_feat, grid = norm_cam_coor, padding_mode = 'zeros')  # Left shape: (B, C, voxel_z * voxel_y * voxel_x, 1)
+            cam_voxel_feat = cam_voxel_feat.view(B, -1, voxel_z, voxel_y, voxel_x)  # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
+            bev_feat = cam_voxel_feat.sum(dim = 3)
+            bev_feat = self.dim_transform(bev_feat) # Left shape: (B, C, voxel_z, voxel_x)
+        elif self.cfg.INPUT.INPUT_MODALITY == 'point':
+            bev_feat = self.dim_transform(point_feat)
         
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
         bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
@@ -654,17 +673,7 @@ class DETECTOR3D_HEAD(nn.Module):
         query_embeds = self.query_embedding(pos2posemb3d(reference_points))   # Left shape: (B, num_query, L) 
         tgt = self.tgt_embed.weight[None].expand(B, -1, -1) # Left shape: (B, num_query, L)
 
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-            center_conf_pred = center_head_out['topk_center_conf'].detach()  # Left shape: (B, num_proposal, 1)
-            topk_center_xyz = center_head_out['topk_center_xyz'].detach()    # Left shape: (B, num_proposal, 3)
-            center_conf_emb = self.center_conf_emb(center_conf_pred)    # Left shape: (B, num_proposal, L)
-            center_xyz_emb = self.center_xyz_emb(pos2posemb3d(topk_center_xyz))  # Left shape: (B, num_proposal, L)
-            center_proposal_num = center_conf_emb.shape[1]
-            center_initialized_tgt = tgt[:, :center_proposal_num].clone() + center_conf_emb + center_xyz_emb
-            tgt = torch.cat((center_initialized_tgt, tgt[:, center_proposal_num:]), dim = 1) # Left shape: (B, num_query, L) 
-
         query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
-        
 
         outs_dec = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
             reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)

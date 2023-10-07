@@ -1,4 +1,4 @@
-exp_id=mm_omni3d_convnext_global
+exp_id=mm_omni3d_convnext_camera
 
 #ulimit -n 65536
 

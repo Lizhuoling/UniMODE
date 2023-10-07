@@ -109,9 +109,11 @@ def get_cfg_defaults(cfg):
 
     cfg.TEST.VISIBILITY_THRES = 1/2.0
     cfg.TEST.TRUNCATION_THRES = 1/2.0
+    cfg.TEST.EVAL_MODE = 'ALL_PRED'
 
     cfg.INPUT.RANDOM_FLIP = "horizontal"
     cfg.INPUT.COLOR_AUG = False
+    cfg.INPUT.INPUT_MODALITY = 'multi-modal'
     cfg.INPUT.RESIZE_TGT_SIZE = (1280, 1024)
 
     # weight path specifically for pretraining (no checkpointables will be loaded)

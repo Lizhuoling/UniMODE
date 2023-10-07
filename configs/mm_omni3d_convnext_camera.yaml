@@ -12,6 +12,7 @@ INPUT:
   RESIZE_TGT_SIZE: (640, 512)
   RANDOM_FLIP: "none"
   COLOR_AUG: True
+  INPUT_MODALITY: 'camera' # 'multi-modal' or 'camera' or 'point'
 
 SOLVER:
   IMS_PER_BATCH: 128

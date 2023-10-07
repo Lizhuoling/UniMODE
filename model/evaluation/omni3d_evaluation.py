@@ -13,6 +13,7 @@ from typing import List, Union
 from typing import Tuple
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 import pycocotools.mask as maskUtils
 import torch
 from detectron2.utils.memory import retry_if_cuda_oom
@@ -44,6 +45,7 @@ from model.data import (
     get_omni3d_categories,
     simple_register
 )
+from model import util as cubercnn_util
 
 """
 This file contains
@@ -172,6 +174,7 @@ class Omni3DEvaluationHelper:
             output_folder,
             iter_label='-',
             only_2d=False,
+            eval_mode = 'ALL_PRED',
         ):
         """
         A helper class to initialize, evaluate and summarize Omni3D metrics. 
@@ -200,6 +203,7 @@ class Omni3DEvaluationHelper:
         self.output_folder = output_folder
         self.iter_label = iter_label
         self.only_2d = only_2d
+        self.eval_mode = eval_mode
 
         # Each dataset evaluator is stored here
         self.evaluators = OrderedDict()
@@ -237,6 +241,7 @@ class Omni3DEvaluationHelper:
                 filter_settings=self.filter_settings, only_2d=self.only_2d, 
                 eval_prox=('Objectron' in dataset_name or 'SUNRGBD' in dataset_name),
                 distributed=False, # actual evaluation should be single process
+                eval_mode = self.eval_mode,
             )
 
             self.evaluators[dataset_name].reset()
@@ -331,7 +336,7 @@ class Omni3DEvaluationHelper:
 
         # default are all NaN
         general_2D, general_3D, omni_2D, omni_3D = (np.nan,) * 4
-
+        
         # 2D and 3D performance for categories in dataset; and log
         general_2D = np.mean([results['bbox_2D']['AP-{}'.format(cat)] for cat in categories])
         if not self.only_2d:
@@ -653,6 +658,7 @@ class Omni3DEvaluator(COCOEvaluator):
         eval_prox=False,
         only_2d=False,
         filter_settings={},
+        eval_mode = None,
     ):
         """
         Args:
@@ -693,6 +699,7 @@ class Omni3DEvaluator(COCOEvaluator):
         self._eval_prox = eval_prox
         self._only_2d = only_2d
         self._filter_settings = filter_settings
+        self.eval_mode = eval_mode
 
         # COCOeval requires the limit on the number of detections per image (maxDets) to be a list
         # with at least 3 elements. The default maxDets in COCOeval is [1, 10, 100], in which the
@@ -910,6 +917,7 @@ class Omni3DEvaluator(COCOEvaluator):
                     img_ids=img_ids,
                     only_2d=self._only_2d,
                     eval_prox=self._eval_prox,
+                    eval_mode = self.eval_mode,
                 )
                 if len(omni_results) > 0
                 else None  # cocoapi does not handle empty results very well
@@ -940,6 +948,7 @@ def _evaluate_predictions_on_omni(
     img_ids=None,
     only_2d=False,
     eval_prox=False,
+    eval_mode = None,
 ):
     """
     Evaluate the coco results using COCOEval API.
@@ -953,8 +962,9 @@ def _evaluate_predictions_on_omni(
 
     for mode in modes:
         omni_eval = Omni3Deval(
-            omni_gt, omni_dt, iouType=iou_type, mode=mode, eval_prox=eval_prox
+            omni_gt, omni_dt, iouType=iou_type, mode=mode, eval_prox=eval_prox, eval_mode = eval_mode,
         )
+        
         if img_ids is not None:
             omni_eval.params.imgIds = img_ids
 
@@ -1095,7 +1105,7 @@ class Omni3Deval(COCOeval):
     """
 
     def __init__(
-        self, cocoGt=None, cocoDt=None, iouType="bbox", mode="2D", eval_prox=False
+        self, cocoGt=None, cocoDt=None, iouType="bbox", mode="2D", eval_prox=False, eval_mode = None,
     ):
         """
         Initialize COCOeval using coco APIs for Gt and Dt
@@ -1119,6 +1129,8 @@ class Omni3Deval(COCOeval):
         self.eval_prox = eval_prox
         self.cocoGt = cocoGt  # ground truth COCO API
         self.cocoDt = cocoDt  # detections COCO API
+
+        self.eval_mode = eval_mode
         
         # per-image per-category evaluation results [KxAxI] elements
         self.evalImgs = defaultdict(list) 
@@ -1343,7 +1355,7 @@ class Omni3Deval(COCOeval):
         }
 
         maxDet = p.maxDets[-1]
-
+        
         self.evalImgs = [
             self.evaluateImg(imgId, catId, areaRng, maxDet)
             for catId in catIds
@@ -1390,7 +1402,7 @@ class Omni3Deval(COCOeval):
                 d = [d["bbox3D"] for d in dt]
         else:
             raise Exception("unknown iouType for iou computation")
-
+        
         # compute iou between each dt and gt region
         # iscrowd is required in builtin maskUtils so we
         # use a dummy buffer for it
@@ -1400,17 +1412,44 @@ class Omni3Deval(COCOeval):
 
         elif len(d) > 0 and len(g) > 0:
             
+            # Match predictions with gts based on 3d centers.
+            if self.eval_mode != 'ALL_PRED':
+                pred_loc = np.array([ele['center_cam'] for ele in dt])  # (num_pred, 3)
+                pred_pose = np.array([ele['pose'] for ele in dt])   # (num_pred, 3, 3)
+                pred_dim = np.array([ele['dimensions'] for ele in dt])  # (num_pred, 3)
+                gt_loc = np.array([ele['center_cam'] for ele in gt])  # (num_gt, 3)
+                gt_pose = np.array([ele['R_cam'] for ele in gt])  # (num_gt, 3, 3)
+                gt_dim = np.array([ele['dimensions'] for ele in gt])  # (num_gt, 3)
+                dict_cost = np.sum(np.square(pred_loc[:, None, :] - gt_loc[None, :, :]), axis=2)
+                pred_idx, gt_idx = linear_sum_assignment(dict_cost)
+                gt_pred_loc = copy.deepcopy(pred_loc)
+                gt_pred_loc[pred_idx] = gt_loc[gt_idx]
+                gt_pred_pose = copy.deepcopy(pred_pose)
+                gt_pred_pose[pred_idx] = gt_pose[gt_idx]
+                gt_pred_dim = copy.deepcopy(pred_dim)
+                gt_pred_dim[pred_idx] = gt_dim[gt_idx]
+                pred_gtloc_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((gt_pred_loc, pred_dim), axis = 1)), torch.Tensor(pred_pose))[0]
+                pred_gtposedim_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((pred_loc, gt_pred_dim), axis = 1)), torch.Tensor(gt_pred_pose))[0]
+
             # For 3D eval, we want to run IoU in CUDA if available
             if torch.cuda.is_available() and len(d) * len(g) < MAX_DTS_CROSS_GTS_FOR_IOU3D:
                 device = torch.device("cuda:0") 
             else:
                 device = torch.device("cpu")
             
-            dd = torch.tensor(d, device=device, dtype=torch.float32)
             gg = torch.tensor(g, device=device, dtype=torch.float32)
 
-            ious = box3d_overlap(dd, gg).cpu().numpy()
-
+            if self.eval_mode == 'ALL_PRED':
+                dd = torch.tensor(d, device=device, dtype=torch.float32)
+                ious = box3d_overlap(dd, gg).cpu().numpy()
+            elif self.eval_mode == 'GT_LOC':
+                ious = box3d_overlap(pred_gtloc_bbox3D.to(device), gg).cpu().numpy()
+            elif self.eval_mode == 'GT_POSEDIM':
+                ious = box3d_overlap(pred_gtposedim_bbox3D.to(device), gg).cpu().numpy()
+            elif self.eval_mode == 'MEAN_GT':
+                gtloc_ious = box3d_overlap(pred_gtloc_bbox3D.to(device), gg).cpu().numpy()
+                gtposedim_ious = box3d_overlap(pred_gtposedim_bbox3D.to(device), gg).cpu().numpy()
+                ious = (gtloc_ious + gtposedim_ious) / 2
         else:
             ious = []
 

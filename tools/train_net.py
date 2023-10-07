@@ -74,6 +74,7 @@ def do_test(cfg, model, iteration='final', storage=None):
         output_folder, 
         iter_label=iteration,
         only_2d=False,
+        eval_mode = cfg.TEST.EVAL_MODE,
     )
 
     for dataset_name in dataset_names_test:
