@@ -5,9 +5,9 @@ exp_id=mm_omni3d_convnext_global
 CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/train_net.py \
   --config-file configs/$exp_id.yaml \
   --num-gpus 4 \
-  --num-machines 2 \
+  --num-machines 1 \
   --machine-rank 0 \
-  --dist-url tcp://10.106.11.4:30891 \
+  --dist-url tcp://127.0.0.1:12345 \
   OUTPUT_DIR output/$exp_id \
   #--resume \
   #MODEL.WEIGHTS_PRETRAIN output/$exp_id/model_recent.pth \
