@@ -1,4 +1,4 @@
-exp_id=mm_omni3d_convnext_global_halflr
+exp_id=mm_omni3d_convnext_deformable
 
 #ulimit -n 65536
 
