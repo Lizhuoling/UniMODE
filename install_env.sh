@@ -40,3 +40,5 @@ pip install numba==0.56.4
 cd model/deformable_ops
 python setup.py develop
 cd ../..
+
+python setup_voxel_pooling.py develop

@@ -44,6 +44,7 @@ from model.modeling.detector3d.center_head import CENTER_HEAD
 from model.modeling.detector3d.mm_dv_attn import MultiModal_DualView_Attn
 from model.modeling.backbone.dla import DLABackbone
 from model.spconv_voxelize import SPConvVoxelization
+from voxel_pooling.voxel_pooling_train import voxel_pooling_train
 
 class DETECTOR3D(BaseModule):
     def __init__(self, cfg):
@@ -102,7 +103,7 @@ class DETECTOR3D(BaseModule):
             if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_NECK == 'SECONDFPN':
                 self.pts_neck = mmdet3d_builder.build_neck(pts_neck_cfg)
         
-        self.detector3d_head = DETECTOR3D_HEAD(cfg,)
+        self.detector3d_head = DETECTOR3D_HEAD(cfg, sum(neck_cfg['out_channels']))
 
     @auto_fp16(apply_to=('imgs'), out_fp32=True)
     def extract_cam_feat(self, imgs, batched_inputs):
@@ -487,9 +488,10 @@ def matcher_cfgs(matcher_name, cfg):
 
 
 class DETECTOR3D_HEAD(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, in_channels):
         super().__init__()
         self.cfg = cfg
+        self.in_channels = in_channels
 
         assert len(set(cfg.DATASETS.CATEGORY_NAMES)) == len(cfg.DATASETS.CATEGORY_NAMES)
         self.total_cls_num = len(cfg.DATASETS.CATEGORY_NAMES)
@@ -500,6 +502,7 @@ class DETECTOR3D_HEAD(nn.Module):
         self.x_bound = [self.position_range[0], self.position_range[1], cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.GRID_SIZE[0]]
         self.y_bound = [self.position_range[2], self.position_range[3], cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.GRID_SIZE[1]]
         self.z_bound = [self.position_range[4], self.position_range[5], cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.GRID_SIZE[2]]
+        self.d_bound = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.D_BOUND
         
         self.embed_dims = 256
         self.uncern_range = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.UNCERN_RANGE
@@ -512,16 +515,14 @@ class DETECTOR3D_HEAD(nn.Module):
         img_shape_after_aug = cfg.INPUT.RESIZE_TGT_SIZE
         assert img_shape_after_aug[0] % self.downsample_factor == 0 and img_shape_after_aug[1] % self.downsample_factor == 0
         feat_shape = (img_shape_after_aug[0] // self.downsample_factor, img_shape_after_aug[1] // self.downsample_factor)
+        self.register_buffer('frustum', self.create_frustum(cfg.INPUT.RESIZE_TGT_SIZE, feat_shape))
 
-        self.register_buffer('voxel_coor', self.create_voxel_coor())
-
+        self.depth_channels = math.ceil((self.d_bound[1] - self.d_bound[0]) / self.d_bound[2])
+        
+        if self.cfg.INPUT.INPUT_MODALITY in ('point', 'multi-modal'):
+            self.dim_transform = nn.Conv2d(512, self.embed_dims, kernel_size=1, stride=1, padding=0)
         if self.cfg.INPUT.INPUT_MODALITY == 'multi-modal':
-            self.mm_dv_attn = MultiModal_DualView_Attn(cfg, img_in_ch = 512, point_in_ch = 512, voxel_num = [int((row[1] - row[0]) / row[2]) for row in \
-                [self.x_bound, self.y_bound, self.z_bound]], out_ch = self.embed_dims)
-        elif self.cfg.INPUT.INPUT_MODALITY == 'camera':
-            self.dim_transform = nn.Conv2d(512, self.embed_dims, kernel_size=1, stride=1, padding=0)
-        elif self.cfg.INPUT.INPUT_MODALITY == 'point':
-            self.dim_transform = nn.Conv2d(512, self.embed_dims, kernel_size=1, stride=1, padding=0)
+            self.bev_modal_fusion = nn.Conv2d(2 * self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0)
         
         self.pos2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
         self.bev_pos2d_encoder = nn.Sequential(
@@ -530,6 +531,8 @@ class DETECTOR3D_HEAD(nn.Module):
             nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
         )
 
+        self.depthnet = DepthNet(in_channels = self.in_channels, mid_channels = self.in_channels, context_channels = self.embed_dims, depth_channels = self.depth_channels, cfg = cfg)
+        
         # Generating query heads
         if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
             self.center_conf_emb = nn.Linear(1, self.embed_dims)
@@ -612,48 +615,65 @@ class DETECTOR3D_HEAD(nn.Module):
         nn.init.uniform_(self.reference_points.weight.data, 0, 1)
         self.reference_points.weight.requires_grad = False
 
-    def create_voxel_coor(self,):
-        xs = torch.linspace(self.x_bound[0] + self.x_bound[2] / 2, self.x_bound[1] - self.x_bound[2] / 2, self.voxel_num[0], dtype = torch.float32) \
-            .view(1, 1, -1).expand(self.voxel_num[2], self.voxel_num[1], self.voxel_num[0])
-        ys = torch.linspace(self.y_bound[0] + self.y_bound[2] / 2, self.y_bound[1] - self.y_bound[2] / 2, self.voxel_num[1], dtype = torch.float32) \
-            .view(1, -1, 1).expand(self.voxel_num[2], self.voxel_num[1], self.voxel_num[0])
-        zs = torch.linspace(self.z_bound[0] + self.z_bound[2] / 2, self.z_bound[1] - self.z_bound[2] / 2, self.voxel_num[2], dtype = torch.float32) \
-            .view(-1, 1, 1).expand(self.voxel_num[2], self.voxel_num[1], self.voxel_num[0])
-        voxel_coor = torch.stack((xs, ys, zs), dim = -1)    # Left shape: (voxel_z, voxel_y, voxel_x, 3)
-        return voxel_coor
+    def create_frustum(self, img_shape_after_aug, feat_shape):
+        ogfW, ogfH = img_shape_after_aug
+        fW, fH = feat_shape
+        d_coords = torch.arange(*self.d_bound, dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # Left shape: (D, H, W)
+        D, _, _ = d_coords.shape
+        x_coords = torch.linspace(0, ogfW - 1, fW, dtype=torch.float).view(1, 1, fW).expand(D, fH, fW)
+        y_coords = torch.linspace(0, ogfH - 1, fH, dtype=torch.float).view(1, fH, 1).expand(D, fH, fW)
+        frustum = torch.stack((x_coords, y_coords, d_coords), -1) # Left shape: (D, H, W, 3)
+        
+        return frustum
 
     @torch.no_grad()
     def get_geometry(self, Ks, B, img_shape_after_aug):
-        voxel_coor = self.voxel_coor[None].expand(B, -1, -1, -1, -1)    # Left shape: (B, bev_z, bev_y, bev_x, 3)
-        cam_uvd_coor = (Ks[:, None, None, None, :, :] @ voxel_coor.unsqueeze(-1)).squeeze(-1)   # Left shape: (B, bev_z, bev_y, bev_x, 3)
-        cam_uv_coor = cam_uvd_coor[..., :2] / cam_uvd_coor[..., 2:] # Left shape: (B, bev_z, bev_y, bev_x, 2)
-        cam_uv_coor[..., 0] = (cam_uv_coor[..., 0] - img_shape_after_aug[0] / 2) / (img_shape_after_aug[0] / 2)
-        cam_uv_coor[..., 1] = (cam_uv_coor[..., 1] - img_shape_after_aug[1] / 2) / (img_shape_after_aug[1] / 2)
-        return cam_uv_coor
+        points = self.frustum[None].expand(B, -1, -1, -1, -1)   # Left shape: (B, D, H, W, 3)
+        points = torch.cat((points[..., :2] * points[..., 2:], points[..., 2:]), dim = -1)  # Left shape: (B, D, H, W, 3)
+        points = points.unsqueeze(-1)  # Left shape: (1, D, H, W, 3, 1)
+        Ks = Ks[:, None, None, None]    # Left shape: (B, 1, 1, 1, 3, 3)
+        points = (Ks.inverse() @ points).squeeze(-1)    # Left shape: (B, D, H, W, 3)
+        return points
 
     def forward(self, cam_feat, point_feat, Ks, scale_ratios, img_mask, batched_inputs, ori_img_resolution, center_head_out = None):
         if cam_feat != None:
             B = cam_feat.shape[0]
         else:
             B = point_feat.shape[0]
+        img_mask = F.interpolate(img_mask[None], size=cam_feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
 
-        if self.cfg.INPUT.INPUT_MODALITY == 'multi-modal':
-            norm_cam_coor = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy())    # Left shape: (B, voxel_z, voxel_y, voxel_x, 2)
-            _, voxel_z, voxel_y, voxel_x, _ = norm_cam_coor.shape
-            norm_cam_coor = norm_cam_coor.view(B, voxel_z * voxel_y * voxel_x, 1, 2)
-            cam_voxel_feat = F.grid_sample(input = cam_feat, grid = norm_cam_coor, padding_mode = 'zeros')  # Left shape: (B, C, voxel_z * voxel_y * voxel_x, 1)
-            cam_voxel_feat = cam_voxel_feat.view(B, -1, voxel_z, voxel_y, voxel_x)  # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
-            bev_feat = self.mm_dv_attn(cam_voxel_feat, point_feat, batched_inputs)
-        elif self.cfg.INPUT.INPUT_MODALITY == 'camera':
-            norm_cam_coor = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy())    # Left shape: (B, voxel_z, voxel_y, voxel_x, 2)
-            _, voxel_z, voxel_y, voxel_x, _ = norm_cam_coor.shape
-            norm_cam_coor = norm_cam_coor.view(B, voxel_z * voxel_y * voxel_x, 1, 2)
-            cam_voxel_feat = F.grid_sample(input = cam_feat, grid = norm_cam_coor, padding_mode = 'zeros')  # Left shape: (B, C, voxel_z * voxel_y * voxel_x, 1)
-            cam_voxel_feat = cam_voxel_feat.view(B, -1, voxel_z, voxel_y, voxel_x)  # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
-            bev_feat = cam_voxel_feat.sum(dim = 3)
-            bev_feat = self.dim_transform(bev_feat) # Left shape: (B, C, voxel_z, voxel_x)
+        if self.cfg.INPUT.INPUT_MODALITY in ('multi-modal', 'camera'):
+            depth_and_feat = self.depthnet(cam_feat, Ks)
+            depth = depth_and_feat[:, :self.depth_channels]
+            depth = depth.softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)
+            cam_feat = depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)]  # Left shape: (B, C, H, W)
+            geom_xyz = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy())    # Left shape: (B, D, H, W, 3)
+            geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
+            B, D, H, W, _ = geom_xyz.shape
+            B_idx = torch.arange(start = 0, end = B, device = geom_xyz.device)
+            D_idx = torch.arange(start = 0, end = D, device = geom_xyz.device)
+            H_idx = torch.arange(start = 0, end = H, device = geom_xyz.device)
+            W_idx = torch.arange(start = 0, end = W, device = geom_xyz.device)
+            B_idx, D_idx, H_idx, W_idx = torch.meshgrid(B_idx, D_idx, H_idx, W_idx)
+            HW_idx = H_idx * W + W_idx
+            BDHW_idx = torch.stack((B_idx, D_idx, HW_idx), dim = -1)    # Left shape: (B, D, H, W, 3)
+            geom_xyz = torch.cat((geom_xyz, BDHW_idx), dim = -1)    # Left shape: (B, D, H, W, 6). The first 3 numbers are voxel x, y, z. The remaning 3 numbers are b, d, hw.
+            outrange_mask = (geom_xyz[..., 0] < 0) | (geom_xyz[..., 0] >= self.voxel_num[0]) | (geom_xyz[..., 1] < 0) | (geom_xyz[..., 1] >= self.voxel_num[1]) | (geom_xyz[..., 2] < 0) | (geom_xyz[..., 2] >= self.voxel_num[2])
+            invalid_mask = img_mask.unsqueeze(1) | outrange_mask
+            valid_mask = ~invalid_mask
+            geom_xyz = geom_xyz[valid_mask] # Left shape: (num_proj, 6)
+            voxel_cam_feat = voxel_pooling_train(geom_xyz.int().contiguous(), cam_feat.contiguous(), depth.contiguous(), self.voxel_num).permute(0, 4, 1, 2, 3).contiguous()   # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
+            cam_bev_feat = voxel_cam_feat.sum(3)    # Left shape: (B, C, bev_z, bev_x)
+
+        if self.cfg.INPUT.INPUT_MODALITY in  ('multi-modal', 'point'):
+            point_bev_feat = self.dim_transform(point_feat)
+
+        if self.cfg.INPUT.INPUT_MODALITY == 'camera':
+            bev_feat = cam_bev_feat
         elif self.cfg.INPUT.INPUT_MODALITY == 'point':
-            bev_feat = self.dim_transform(point_feat)
+            bev_feat = point_bev_feat
+        elif self.cfg.INPUT.INPUT_MODALITY == 'multi-modal':
+            bev_feat = self.bev_modal_fusion(torch.cat((cam_bev_feat, point_bev_feat), dim = 1))
         
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
         bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)

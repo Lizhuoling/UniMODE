@@ -84,7 +84,8 @@ MODEL:
         DEC_NUM: 6
 
         POSITION_RANGE: [-30, 30, -40, 40, 0, 80]
-        GRID_SIZE: [1, 10, 1]
+        GRID_SIZE: [1, 80, 1]
+        D_BOUND: [0.1, 100, 1]
         ENC_CAM_INTRINSIC: True 
 
       POST_PROCESS:
