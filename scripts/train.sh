@@ -1,4 +1,4 @@
-exp_id=bev_convnext_deformable
+exp_id=bev_convnext_global
 
 #ulimit -n 65536
 
