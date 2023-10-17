@@ -1,11 +1,11 @@
 _BASE_: "Base.yaml"
 
 DATASETS:
-  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'ARKitScenes_train', 'ARKitScenes_val', 'Objectron_train', 'Objectron_val',)
+  TRAIN: ('nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
   #TRAIN: ('SUNRGBD_val',)
-  TEST: ('SUNRGBD_test', 'ARKitScenes_test', 'Objectron_test',)
+  TEST: ('KITTI_test', 'nuScenes_test')
   #TEST: ('SUNRGBD_val',)
-  CATEGORY_NAMES: ('pillow', 'lamp', 'picture', 'stationery', 'cup', 'counter', 'shoes', 'clothes', 'curtain', 'oven', 'toilet', 'bathtub', 'box', 'television', 'floor mat', 'chair', 'camera', 'bicycle', 'sofa', 'machine', 'night stand', 'desk', 'bottle', 'table', 'window', 'books', 'sink', 'towel', 'cereal box', 'bookcase', 'refrigerator', 'door', 'stove', 'mirror', 'bin', 'cabinet', 'shelves', 'blinds', 'laptop', 'bed')
+  CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
   DATA_RATIO: 1.0
 
 INPUT:
@@ -18,7 +18,7 @@ SOLVER:
   TYPE: "mmcv_AdamW"
   BASE_LR: 8e-4
   WEIGHT_DECAY: 1e-2
-  MAX_ITER: 130500
+  MAX_ITER: 43500
   VIRTUAL_EPOCHS: 20
   VIRTUAL_LOSS: 5.0   # To avoid the total loss is too small.
 
@@ -33,7 +33,7 @@ SOLVER:
     NORM_TYPE: 2.0
 
 TEST:
-  EVAL_PERIOD: 26100
+  EVAL_PERIOD: 8700
   EVAL_MODE: 'MEAN_GT' # 'ALL_PRED' or 'GT_LOC' or 'GT_POSEDIM' or 'MEAN_GT'
 
 MODEL:
