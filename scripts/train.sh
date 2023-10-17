@@ -1,4 +1,4 @@
-exp_id=bev_convnext_global
+exp_id=bev_convnext_deformable_indoor
 
 #ulimit -n 65536
 
