@@ -1,4 +1,4 @@
-exp_id=bev_convnext_deformable_scratch
+exp_id=bev_convnext_deformable_res50
 
 #ulimit -n 65536
 
