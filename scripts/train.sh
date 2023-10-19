@@ -1,4 +1,4 @@
-exp_id=bev_convnext_deformable_indoor
+exp_id=bev_convnext_deformable_scratch
 
 #ulimit -n 65536
 
