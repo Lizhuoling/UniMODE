@@ -392,7 +392,7 @@ def main(args):
     else: 
         # setup and join the data.
         dataset_paths = [os.path.join('datasets', 'MM-Omni3D', name + '.json') for name in cfg.DATASETS.TRAIN]
-        datasets = data.Omni3D(dataset_paths, filter_settings=filter_settings, cfg = cfg)
+        datasets = data.Omni3D(dataset_paths, filter_settings=filter_settings, cfg = cfg, is_train = True)
         
         # determine the meta data given the datasets used. 
         data.register_and_store_model_metadata(datasets, cfg.OUTPUT_DIR, filter_settings)
@@ -406,7 +406,7 @@ def main(args):
         '''
         
         infos = datasets.dataset['info']
-
+        
         if type(infos) == dict:
             infos = [datasets.dataset['info']]
 

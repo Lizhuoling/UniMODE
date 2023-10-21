@@ -6,7 +6,6 @@ DATASETS:
   TEST: ('nuScenes_test', 'ARKitScenes_test',)
   #TEST: ('SUNRGBD_test',)
   CATEGORY_NAMES: ('machine', 'shelves', 'chair', 'car', 'table', 'sofa', 'bus', 'cabinet', 'toilet', 'motorcycle', 'bathtub', 'oven', 'sink', 'traffic cone', 'truck', 'television', 'refrigerator', 'pedestrian', 'stove', 'bicycle', 'trailer', 'barrier', 'bed')
-  DATA_RATIO: 1.0
 
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)

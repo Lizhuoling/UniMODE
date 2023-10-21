@@ -6,7 +6,6 @@ DATASETS:
   TEST: ('KITTI_test', 'nuScenes_test')
   #TEST: ('SUNRGBD_val',)
   CATEGORY_NAMES: ('cyclist', 'pedestrian', 'trailer', 'bus', 'motorcycle', 'car', 'barrier', 'truck', 'van', 'traffic cone', 'bicycle')
-  DATA_RATIO: 1.0
 
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)
@@ -34,7 +33,7 @@ SOLVER:
 
 TEST:
   EVAL_PERIOD: 8700
-  EVAL_MODE: 'MEAN_GT' # 'ALL_PRED' or 'GT_LOC' or 'GT_POSEDIM' or 'MEAN_GT'
+  EVAL_MODE: 'DAP3D' # 'ALL_PRED' or 'GT_LOC' or 'GT_POSEDIM' or 'DAP3D'
 
 MODEL:
   META_ARCHITECTURE: "Omni3DFormer"

@@ -1,4 +1,4 @@
-exp_id=bev_convnext_deformable_res50
+exp_id=bev_convnext_deformable_camera
 
 #ulimit -n 65536
 

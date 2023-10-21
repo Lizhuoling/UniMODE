@@ -721,7 +721,7 @@ class Omni3DEvaluator(COCOEvaluator):
 
         json_file = PathManager.get_local_path(self._metadata.json_file)
         with contextlib.redirect_stdout(io.StringIO()):
-            self._omni_api = Omni3D([json_file], filter_settings)
+            self._omni_api = Omni3D([json_file], filter_settings, is_train = False)
 
         # Test set json files do not contain annotations (evaluation must be
         # performed using the COCO evaluation server).
@@ -1428,8 +1428,20 @@ class Omni3Deval(COCOeval):
                 gt_pred_pose[pred_idx] = gt_pose[gt_idx]
                 gt_pred_dim = copy.deepcopy(pred_dim)
                 gt_pred_dim[pred_idx] = gt_dim[gt_idx]
-                pred_gtloc_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((gt_pred_loc, pred_dim), axis = 1)), torch.Tensor(pred_pose))[0]
-                pred_gtposedim_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((pred_loc, gt_pred_dim), axis = 1)), torch.Tensor(gt_pred_pose))[0]
+                if self.eval_mode == 'GT_LOC':
+                    pred_gtloc_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((gt_pred_loc, pred_dim), axis = 1)), torch.Tensor(pred_pose))[0]
+                elif self.eval_mode == 'GT_POSE':
+                    pred_gtpose_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((pred_loc, pred_dim), axis = 1)), torch.Tensor(gt_pred_pose))[0]
+                elif self.eval_mode == 'GT_DIM':
+                    pred_gtdim_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((pred_loc, gt_pred_dim), axis = 1)), torch.Tensor(pred_pose))[0]
+                elif self.eval_mode == 'GT_POSEDIM':
+                    pred_gtposedim_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((pred_loc, gt_pred_dim), axis = 1)), torch.Tensor(gt_pred_pose))[0]
+                elif self.eval_mode == 'DAP3D':
+                    pred_gtlocpose_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((gt_pred_loc, pred_dim), axis = 1)), torch.Tensor(gt_pred_pose))[0]
+                    pred_gtlocdim_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((gt_pred_loc, gt_pred_dim), axis = 1)), torch.Tensor(pred_pose))[0]
+                    pred_gtposedim_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((pred_loc, gt_pred_dim), axis = 1)), torch.Tensor(gt_pred_pose))[0]
+                else:
+                    raise Exception("The eval_mode {} is not supported.".format(self.eval_mode))
 
             # For 3D eval, we want to run IoU in CUDA if available
             if torch.cuda.is_available() and len(d) * len(g) < MAX_DTS_CROSS_GTS_FOR_IOU3D:
@@ -1444,12 +1456,17 @@ class Omni3Deval(COCOeval):
                 ious = box3d_overlap(dd, gg).cpu().numpy()
             elif self.eval_mode == 'GT_LOC':
                 ious = box3d_overlap(pred_gtloc_bbox3D.to(device), gg).cpu().numpy()
+            elif self.eval_mode == 'GT_POSE':
+                ious = box3d_overlap(pred_gtpose_bbox3D.to(device), gg).cpu().numpy()
+            elif self.eval_mode == 'GT_DIM':
+                ious = box3d_overlap(pred_gtdim_bbox3D.to(device), gg).cpu().numpy()
             elif self.eval_mode == 'GT_POSEDIM':
                 ious = box3d_overlap(pred_gtposedim_bbox3D.to(device), gg).cpu().numpy()
-            elif self.eval_mode == 'MEAN_GT':
-                gtloc_ious = box3d_overlap(pred_gtloc_bbox3D.to(device), gg).cpu().numpy()
+            elif self.eval_mode == 'DAP3D':
+                gtlocpose_ious = box3d_overlap(pred_gtlocpose_bbox3D.to(device), gg).cpu().numpy()
+                gtlocdim_ious = box3d_overlap(pred_gtlocdim_bbox3D.to(device), gg).cpu().numpy()
                 gtposedim_ious = box3d_overlap(pred_gtposedim_bbox3D.to(device), gg).cpu().numpy()
-                ious = (gtloc_ious + gtposedim_ious) / 2
+                ious = (gtlocpose_ious + gtlocdim_ious + gtposedim_ious) / 3
         else:
             ious = []
 

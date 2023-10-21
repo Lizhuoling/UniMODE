@@ -1,20 +1,19 @@
 _BASE_: "Base.yaml"
 
 DATASETS:
-  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'ARKitScenes_train', 'ARKitScenes_val', 'Objectron_train', 'Objectron_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
-  #TRAIN: ('SUNRGBD_val',)
-  TEST: ('SUNRGBD_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
-  #TEST: ('SUNRGBD_val',)
+  #TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'ARKitScenes_train', 'ARKitScenes_val', 'Objectron_train', 'Objectron_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
+  TRAIN: ('SUNRGBD_val',)
+  #TEST: ('SUNRGBD_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
+  TEST: ('SUNRGBD_val',)
   CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
-  DATA_RATIO: 1.0
-
+  
 INPUT:
   RESIZE_TGT_SIZE: (640, 512)
   RANDOM_FLIP: "none"
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 128
+  IMS_PER_BATCH: 4 #128
   TYPE: "mmcv_AdamW"
   BASE_LR: 8e-4
   WEIGHT_DECAY: 1e-2
@@ -34,7 +33,7 @@ SOLVER:
 
 TEST:
   EVAL_PERIOD: 34800
-  EVAL_MODE: 'MEAN_GT' # 'ALL_PRED' or 'GT_LOC' or 'GT_POSEDIM' or 'MEAN_GT'
+  EVAL_MODE: 'DAP3D' # 'ALL_PRED' or 'GT_LOC' or 'GT_POSEDIM' or 'DAP3D'
 
 MODEL:
   META_ARCHITECTURE: "Omni3DFormer"
@@ -57,7 +56,7 @@ MODEL:
       TRANSFORMER_DROPOUT: 0.1
       MATCHER_NAME: 'HungarianAssigner3D'
       NUM_QUERY: 200
-      FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
+      FEAT_LEVEL_IDXS: (1, 2, 3, 4)
       DOWNSAMPLE_FACTOR: 16
       LLS_SPARSE: 1e-3
       NAIVE_DEPTH_HEAD: False

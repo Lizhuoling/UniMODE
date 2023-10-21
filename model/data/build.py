@@ -65,14 +65,14 @@ def _train_loader_from_config(cfg, mapper=None, *, dataset=None, sampler=None, d
         balance_datasets = cfg.DATALOADER.BALANCE_DATASETS
         logger = logging.getLogger(__name__)
         logger.info("Using training sampler {}".format(sampler_name))
-
+        
         if balance_datasets:
             assert dataset_id_to_src is not None, 'Need dataset sources.'
 
             dataset_source_to_int = {val:i for i, val in enumerate(set(dataset_id_to_src.values()))}
             dataset_ids_per_img = [dataset_source_to_int[dataset_id_to_src[img['dataset_id']]] for img in dataset]
             dataset_ids = np.unique(dataset_ids_per_img)
-
+            
             # only one source? don't re-weight then.
             if len(dataset_ids) == 1:
                 weights_per_img = torch.ones(len(dataset_ids_per_img)).float()
@@ -90,7 +90,7 @@ def _train_loader_from_config(cfg, mapper=None, *, dataset=None, sampler=None, d
                 # copy weights
                 for dataset_id, weight in zip(dataset_ids, weights):
                     weights_per_img[dataset_ids_per_img == dataset_id] = weight
-
+                
         # no special sampling whatsoever
         if sampler_name == "TrainingSampler" and not balance_datasets:
             sampler = TrainingSampler(len(dataset))

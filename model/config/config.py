@@ -7,7 +7,6 @@ def get_cfg_defaults(cfg):
 
     # A list of category names which will be used
     cfg.DATASETS.CATEGORY_NAMES = []
-    cfg.DATASETS.DATA_RATIO = 1.0
 
     # The category names which will be treated as ignore
     # e.g., not counting as background during training

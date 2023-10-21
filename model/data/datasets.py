@@ -146,7 +146,7 @@ class Omni3D(COCO):
     use with Detectron2 or training per se. 
     '''
 
-    def __init__(self, annotation_files, filter_settings=None, cfg = None):
+    def __init__(self, annotation_files, filter_settings=None, cfg = None, is_train = False):
              
         # load dataset
         self.dataset,self.anns,self.cats,self.imgs = dict(),dict(),dict(),dict()
@@ -157,7 +157,11 @@ class Omni3D(COCO):
         
         cats_ids_master = []
         cats_master = []
-        
+
+        datasets_info = []
+        datasets_anno = []
+        datasets_image = []
+
         for annotation_file in annotation_files:
             
             _, name, _ = util.file_parts(annotation_file)
@@ -168,29 +172,14 @@ class Omni3D(COCO):
             assert type(dataset)==dict, 'annotation file format {} not supported'.format(type(dataset))
             print('Done (t={:0.2f}s)'.format(time.time()- tic))
 
-            # Only for training
-            if cfg != None and (cfg.DATASETS.DATA_RATIO > 0 and cfg.DATASETS.DATA_RATIO < 1):
-                data_ratio = cfg.DATASETS.DATA_RATIO
-                image_label_relation_dict = {}
-                dataset_labels = []
-                for anno in dataset['annotations']:
-                    if anno['image_id'] not in image_label_relation_dict.keys():
-                        image_label_relation_dict[anno['image_id']] = []
-                    image_label_relation_dict[anno['image_id']].append(anno)
-                image_num = len(dataset['images'])
-                select_image_num = int(image_num * data_ratio)
-                dataset_images = dataset['images'][:select_image_num]
-                for img in dataset_images:
-                    if img['id'] in image_label_relation_dict.keys():
-                        dataset_labels += image_label_relation_dict[img['id']]
-
-                dataset['images'] = dataset_images
-                dataset['annotations'] = dataset_labels
-
             if type(dataset['info']) == list:
                 dataset['info'] = dataset['info'][0]
                 
             dataset['info']['known_category_ids'] = [cat['id'] for cat in dataset['categories']]
+
+            datasets_info.append(dataset['info'])
+            datasets_anno.append(dataset['annotations'])
+            datasets_image.append(dataset['images'])
 
             # first dataset
             if len(self.dataset) == 0:
@@ -198,7 +187,6 @@ class Omni3D(COCO):
             
             # concatenate datasets
             else:
-
                 if type(self.dataset['info']) == dict:
                     self.dataset['info'] = [self.dataset['info']]
                     
@@ -468,5 +456,5 @@ def load_omni3d_json(json_file, image_root, dataset_name, filter_settings, filte
             invalid_count += 1 
     
     logger.info("Filtered out {}/{} images without valid annotations".format(invalid_count, len(imgs_anns)))
-
+    
     return dataset_dicts
