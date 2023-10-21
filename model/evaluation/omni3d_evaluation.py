@@ -1466,7 +1466,7 @@ class Omni3Deval(COCOeval):
                 gtlocpose_ious = box3d_overlap(pred_gtlocpose_bbox3D.to(device), gg).cpu().numpy()
                 gtlocdim_ious = box3d_overlap(pred_gtlocdim_bbox3D.to(device), gg).cpu().numpy()
                 gtposedim_ious = box3d_overlap(pred_gtposedim_bbox3D.to(device), gg).cpu().numpy()
-                ious = (gtlocpose_ious + gtlocdim_ious + gtposedim_ious) / 3
+                ious = 0.25 * gtlocpose_ious + 0.25 * gtlocdim_ious + 0.5 * gtposedim_ious
         else:
             ious = []
 
