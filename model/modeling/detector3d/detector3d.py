@@ -43,6 +43,7 @@ from model.modeling.detector3d.depthnet import DepthNet
 from model.modeling.detector3d.center_head import CENTER_HEAD
 from model.modeling.detector3d.mm_dv_attn import MultiModal_DualView_Attn
 from model.modeling.backbone.dla import DLABackbone
+from model.modeling.detector3d.mutual_info_inpaint import MutualInfoInpainter
 from model.spconv_voxelize import SPConvVoxelization
 from voxel_pooling.voxel_pooling_train import voxel_pooling_train
 
@@ -150,10 +151,11 @@ class DETECTOR3D(BaseModule):
         voxel_features = self.pts_voxel_encoder(voxels, num_points, coors,)
         batch_size = coors[-1, 0] + 1
         pts_middle_feat = self.pts_middle_encoder(voxel_features, coors, batch_size)
+        pts_valid_mask = (pts_middle_feat.sum(dim = 1) != 0)    # Left shape: (B, bev_y, bev_x)
         pts_backbone_feat = self.pts_backbone(pts_middle_feat)
         pts_neck_feat = self.pts_neck(pts_backbone_feat)
         
-        return pts_neck_feat[0] # Left shape: (bev_y, bev_x)
+        return pts_neck_feat[0], pts_valid_mask # Left shape: (B, C, bev_y, bev_x)
 
     def forward(self, images, points, batched_inputs):
         batched_inputs = self.remove_instance_out_range(batched_inputs)
@@ -190,22 +192,15 @@ class DETECTOR3D(BaseModule):
         else:
             cam_feat = None
         if self.cfg.INPUT.INPUT_MODALITY in ['multi-modal', 'point']:
-            point_feat = self.extract_point_feat(points = points)   # Left shape: (B, C, bev_z, bev_x)
+            point_feat, pts_valid_mask = self.extract_point_feat(points = points)   # Left shape: (B, C, bev_z, bev_x)
         else:
-            point_feat = None
-
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-            center_head_out = self.center_head(cam_feat, Ks, batched_inputs)
-        else:
-            center_head_out = None
+            point_feat, pts_valid_mask = None, None
         
-        petr_out = self.detector3d_head(cam_feat, point_feat, Ks, scale_ratios, masks, batched_inputs, 
+        petr_out = self.detector3d_head(cam_feat, point_feat, pts_valid_mask, Ks, scale_ratios, masks, batched_inputs, 
             ori_img_resolution = ori_img_resolution, 
-            center_head_out = center_head_out,
         )
         detector_out = dict(
             petr_out = petr_out,
-            center_head_out = center_head_out,
             Ks = Ks,
         )
 
@@ -216,9 +211,6 @@ class DETECTOR3D(BaseModule):
 
     def loss(self, detector_out, batched_inputs, ori_img_resolution):
         loss_dict = self.detector3d_head.loss(detector_out['petr_out'], batched_inputs, ori_img_resolution)
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-            center_head_loss_dict = self.center_head.loss(detector_out['center_head_out'], detector_out['Ks'], batched_inputs)
-            loss_dict.update(center_head_loss_dict)
         return loss_dict
     
     def inference(self, detector_out, batched_inputs, ori_img_resolution):
@@ -264,9 +256,7 @@ class DETECTOR3D(BaseModule):
                 batched_inputs[batch_id]['instances']._fields['gt_poses'] = batched_inputs[batch_id]['instances']._fields['gt_poses'][instance_in_rang_flag]
                 batched_inputs[batch_id]['instances']._fields['gt_keypoints'] = batched_inputs[batch_id]['instances']._fields['gt_keypoints'][instance_in_rang_flag]
                 batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'] = batched_inputs[batch_id]['instances']._fields['gt_unknown_category_mask'][instance_in_rang_flag]
-                if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-                    batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'][instance_in_rang_flag]
-                    batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'] =  batched_inputs[batch_id]['instances']._fields['gt_featreso_2dto3d_offset'][instance_in_rang_flag]
+       
         return batched_inputs
 
 def backbone_cfgs(backbone_name, cfg):
@@ -532,15 +522,6 @@ class DETECTOR3D_HEAD(nn.Module):
         )
 
         self.depthnet = DepthNet(in_channels = self.in_channels, mid_channels = self.in_channels, context_channels = self.embed_dims, depth_channels = self.depth_channels, cfg = cfg)
-        
-        # Generating query heads
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-            self.center_conf_emb = nn.Linear(1, self.embed_dims)
-            self.center_xyz_emb = nn.Sequential(
-                nn.Linear(self.embed_dims*3//2, self.embed_dims),
-                nn.ReLU(),
-                nn.Linear(self.embed_dims, self.embed_dims),
-            )
 
         self.reference_points = nn.Embedding(self.num_query, 3)
         self.query_embedding = nn.Sequential(
@@ -583,6 +564,9 @@ class DETECTOR3D_HEAD(nn.Module):
         reg_branch.append(Linear(self.embed_dims, self.code_size))
         reg_branch = nn.Sequential(*reg_branch)
         self.reg_branches = nn.ModuleList([reg_branch for _ in range(self.num_decoder)])
+
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.MUTUAL_INFO_INPAINT:
+            self.mutual_info_inpainter = MutualInfoInpainter(cfg)
 
         # One-to-one macther
         self.cls_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_WEIGHT
@@ -635,7 +619,7 @@ class DETECTOR3D_HEAD(nn.Module):
         points = (Ks.inverse() @ points).squeeze(-1)    # Left shape: (B, D, H, W, 3)
         return points
 
-    def forward(self, cam_feat, point_feat, Ks, scale_ratios, img_mask, batched_inputs, ori_img_resolution, center_head_out = None):
+    def forward(self, cam_feat, point_feat, pts_valid_mask, Ks, scale_ratios, img_mask, batched_inputs, ori_img_resolution):
         if cam_feat != None:
             B = cam_feat.shape[0]
         else:
@@ -660,6 +644,8 @@ class DETECTOR3D_HEAD(nn.Module):
             geom_xyz = torch.cat((geom_xyz, BDHW_idx), dim = -1)    # Left shape: (B, D, H, W, 6). The first 3 numbers are voxel x, y, z. The remaning 3 numbers are b, d, hw.
             outrange_mask = (geom_xyz[..., 0] < 0) | (geom_xyz[..., 0] >= self.voxel_num[0]) | (geom_xyz[..., 1] < 0) | (geom_xyz[..., 1] >= self.voxel_num[1]) | (geom_xyz[..., 2] < 0) | (geom_xyz[..., 2] >= self.voxel_num[2])
             invalid_mask = img_mask.unsqueeze(1) | outrange_mask
+            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LLS_SPARSE > 0:
+                invalid_mask = invalid_mask | (depth < self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LLS_SPARSE) # Left shape: (B, D, H, W)
             valid_mask = ~invalid_mask
             geom_xyz = geom_xyz[valid_mask] # Left shape: (num_proj, 6)
             voxel_cam_feat = voxel_pooling_train(geom_xyz.int().contiguous(), cam_feat.contiguous(), depth.contiguous(), self.voxel_num).permute(0, 4, 1, 2, 3).contiguous()   # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
@@ -678,6 +664,13 @@ class DETECTOR3D_HEAD(nn.Module):
         bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
         bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
         bev_feat_pos = self.bev_pos2d_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
+
+        # Mutual Information Inpaint
+        if self.training and self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.MUTUAL_INFO_INPAINT:
+            cam_valid_mask = (cam_bev_feat.sum(1) != 0) # Left shape: (B, bev_y, bev_x)
+            inpaint_loss = self.mutual_info_inpainter(cam_bev_feat,point_bev_feat, cam_valid_mask, pts_valid_mask)
+        else:
+            inpaint_loss = None
         
         # For vis
         '''depth_map = depth[0].argmax(0).cpu().numpy()
@@ -731,6 +724,7 @@ class DETECTOR3D_HEAD(nn.Module):
             'all_bbox_preds': outputs_regs, # outputs_regs shape: (num_dec, B, num_query, pred_attr_num)
             'enc_cls_scores': None,
             'enc_bbox_preds': None,
+            'inpaint_loss' : inpaint_loss,
         }
         
         return outs
@@ -829,6 +823,10 @@ class DETECTOR3D_HEAD(nn.Module):
         loss_dict = {}
         for ele in decoder_loss_dicts:
             loss_dict.update(ele)
+
+        if self.training and self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.MUTUAL_INFO_INPAINT:
+            inpaint_loss = detector_out['inpaint_loss']
+            loss_dict['inpaint_loss'] = inpaint_loss
 
         return loss_dict
         

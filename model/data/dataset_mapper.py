@@ -161,32 +161,6 @@ class DatasetMapper3D(DatasetMapper):
             instances = detection_utils.filter_empty_instances(instances)
             dataset_dict["instances"] = instances
 
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
-            augmented_image_h, augmented_image_w = image.shape[0], image.shape[1]
-            downsample_factor = self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.DOWNSAMPLE_FACTOR
-            feat_h, feat_w = augmented_image_h // downsample_factor, augmented_image_w // downsample_factor
-            # Prepare 2D center gts.
-            heatmap = np.zeros((feat_h, feat_w), dtype = np.float32)
-            gt_box2d = instances._fields['gt_boxes'].tensor.numpy().reshape(-1, 2, 2) # Left shape: (num_box, 2, 2)
-            gt_box2d[gt_box2d < 0] = 0
-            gt_box2d[:, :, 0] = gt_box2d[:, :, 0].clip(max = augmented_image_w - 1)    # clip the width
-            gt_box2d[:, :, 1] = gt_box2d[:, :, 1].clip(max = augmented_image_h - 1)    # clip the height
-            gt_box2d = gt_box2d / downsample_factor
-            gt_box2d_center = np.mean(gt_box2d, axis = 1)  # Left shape: (num_box, 2)
-            gt_box2d_dim = gt_box2d[:, 1] - gt_box2d[:, 0]  # Left shape: (num_box, 2), width first and then height
-            for box_idx in range(gt_box2d.shape[0]):
-                radius = gaussian_radius(gt_box2d_dim[box_idx][1], gt_box2d_dim[box_idx][0])
-                radius = max(0, int(radius))
-                heatmap = draw_umich_gaussian(heatmap, gt_box2d_center[box_idx], radius)    # Left shape: (feat_h, feat_w)
-                dataset_dict['obj_heatmap'] = torch.Tensor(heatmap)
-
-            # Prepare projected 3D center gts. 9 numbers in gt_boxes3D: projected 2D center, depth, w, h, l, 3D center
-            gt_box2d_center = torch.Tensor(gt_box2d_center) # Left shape: (num_box, 2)
-            gt_proj_3dcenters = instances._fields['gt_boxes3D'][:, :2].clone() / downsample_factor # Left shape: (num_box, 2)
-            gt_featreso_2dto3d_offset = gt_proj_3dcenters - gt_box2d_center # Left shape: (num_box, 2)
-            dataset_dict["instances"].set('gt_featreso_box2d_center', gt_box2d_center)
-            dataset_dict["instances"].set('gt_featreso_2dto3d_offset', gt_featreso_2dto3d_offset)
-
         dataset_dict["horizontal_flip_flag"] = False
         for transform in transforms:
             if isinstance(transform, T.HFlipTransform):

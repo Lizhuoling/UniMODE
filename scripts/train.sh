@@ -1,4 +1,4 @@
-exp_id=bev_convnext_deformable_camera
+exp_id=bev_convnext_deformable_pts2cam
 
 #ulimit -n 65536
 
