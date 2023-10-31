@@ -195,6 +195,27 @@ class DETECTOR3D(BaseModule):
             point_feat, pts_valid_mask = self.extract_point_feat(points = points)   # Left shape: (B, C, bev_z, bev_x)
         else:
             point_feat, pts_valid_mask = None, None
+
+        # For vis
+        '''bev_range = [-30, 30, 0, 80]
+        scale_factor = 5
+        scale_bev_range = [scale_factor * ele for ele in bev_range] 
+        bev_points = torch.cat((points[0][:, 0:1], points[0][:, 2:3]), axis = -1).cpu().numpy()
+        bev_points[:, 0] -= bev_range[0]
+        bev_points[:, 1] -= bev_range[2]
+        vis_bev_feat = np.zeros((scale_bev_range[3] - scale_bev_range[2], scale_bev_range[1] - scale_bev_range[0], 3), dtype = np.float32)
+        for point in bev_points:
+            if point[0] >= (bev_range[1]-bev_range[0]-1) or point[0] <= 0 or point[1] >= (bev_range[3]-bev_range[2]-1) or point[1] <= 0: continue
+            r = int(point[1] / bev_range[-1] * 255)
+            g = 255
+            color = (0, g, r)
+            vis_bev_feat[round(scale_factor * point[1]), round(scale_factor * point[0])] = color
+            #cv2.circle(vis_bev_feat, (round(scale_factor * point[0]),round(scale_factor * point[1])), radius = 1, color = color, thickness = -1)
+        vis_bev_feat = vis_bev_feat[::-1, :].astype(np.uint8)
+        cv2.imwrite('point_vis.png', vis_bev_feat)
+        img = batched_inputs[0]['image'].permute(1, 2, 0).contiguous().numpy()
+        cv2.imwrite('img_vis.png', img)
+        pdb.set_trace()'''
         
         petr_out = self.detector3d_head(cam_feat, point_feat, pts_valid_mask, Ks, scale_ratios, masks, batched_inputs, 
             ori_img_resolution = ori_img_resolution, 
@@ -653,6 +674,13 @@ class DETECTOR3D_HEAD(nn.Module):
 
         if self.cfg.INPUT.INPUT_MODALITY in  ('multi-modal', 'point'):
             point_bev_feat = self.dim_transform(point_feat)
+
+        # For vis
+        '''plt.imshow(point_bev_feat[0].permute(1, 2, 0).mean(2).cpu().numpy()[::-1,], cmap = 'magma')
+        plt.xticks([])
+        plt.yticks([])
+        plt.savefig('bev_vis.png', bbox_inches='tight')
+        pdb.set_trace()'''
 
         if self.cfg.INPUT.INPUT_MODALITY == 'camera':
             bev_feat = cam_bev_feat

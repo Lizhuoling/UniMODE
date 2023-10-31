@@ -1,4 +1,4 @@
-exp_id=bev_convnext_deformable_mutual_global
+exp_id=bev_convnext_deformable_mutual_outdoor
 
 #ulimit -n 65536
 

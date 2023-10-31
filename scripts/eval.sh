@@ -1,4 +1,4 @@
-exp_id=bev_convnext_deformable
+exp_id=bev_convnext_deformable_mutual
 
 CUDA_VISIBLE_DEVICES=3 python tools/train_net.py \
   --eval-only \
