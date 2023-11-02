@@ -1,6 +1,6 @@
 exp_id=bev_convnext_deformable_mutual
 
-CUDA_VISIBLE_DEVICES=3 python tools/train_net.py \
+CUDA_VISIBLE_DEVICES=0 python tools/train_net.py \
   --eval-only \
   --config-file configs/$exp_id.yaml \
   OUTPUT_DIR output/$exp_id \

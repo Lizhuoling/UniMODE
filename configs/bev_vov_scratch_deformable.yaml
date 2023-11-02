@@ -44,7 +44,7 @@ MODEL:
     TRANSFORMER_DETECTOR:
       GRID_MASK: False
 
-      BACKBONE_NAME: 'ConvNext_Base'
+      BACKBONE_NAME: 'VoVNet_scratch'
       BACKBONE_FP16: False
       NECK_NAME: 'SECONDFPN'
       PTS_VOXEL_NAME: 'SPConvVoxelization'
@@ -61,9 +61,9 @@ MODEL:
       LLS_SPARSE: 1e-3
       NAIVE_DEPTH_HEAD: False
 
-      MUTUAL_INFO_INPAINT: True
-      PTS_PAINT_CAM: True
-      CAM_PAINT_PTS: True
+      MUTUAL_INFO_INPAINT: False
+      PTS_PAINT_CAM: False
+      CAM_PAINT_PTS: False
       LLS_SPARSE: 5e-4
 
       HEAD:

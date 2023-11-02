@@ -310,13 +310,22 @@ def backbone_cfgs(backbone_name, cfg):
             pretrained = 'MODEL/resnet101_caffe-3ad79236.pth',
         ),
         VoVNet = dict(
-            type='VoVNet', ###use checkpoint to save memory
+            type='VoVNet', #use checkpoint to save memory
             spec_name='V-99-eSE',
             norm_eval=False,
             frozen_stages=-1,
             input_ch=3,
             out_features=cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.FEAT_LEVEL_IDXS,
             pretrained = 'MODEL/fcos3d_vovnet_imgbackbone_omni3d.pth',
+        ),
+        VoVNet_scratch = dict(
+            type='VoVNet', #use checkpoint to save memory
+            spec_name='V-99-eSE',
+            norm_eval=False,
+            frozen_stages=-1,
+            input_ch=3,
+            out_features=cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.FEAT_LEVEL_IDXS,
+            pretrained = None,
         ),
         EVA_Base = dict(
             type = 'eva02_base_patch14_xattn_fusedLN_NaiveSwiGLU_subln_RoPE',
@@ -352,7 +361,7 @@ def neck_cfgs(neck_name, cfg):
         in_channels = [256, 512, 1024, 2048]
         upsample_strides = [0.25, 0.5, 1, 2]
         out_channels = [128, 128, 128, 128]
-    elif cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME in ('VoVNet',):
+    elif cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.BACKBONE_NAME in ('VoVNet', 'VoVNet_scratch'):
         in_channels = [256, 512, 768, 1024]
         upsample_strides = [0.25, 0.5, 1, 2]
         out_channels = [128, 128, 128, 128]

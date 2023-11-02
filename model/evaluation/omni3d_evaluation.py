@@ -1436,7 +1436,7 @@ class Omni3Deval(COCOeval):
                     pred_gtdim_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((pred_loc, gt_pred_dim), axis = 1)), torch.Tensor(pred_pose))[0]
                 elif self.eval_mode == 'GT_POSEDIM':
                     pred_gtposedim_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((pred_loc, gt_pred_dim), axis = 1)), torch.Tensor(gt_pred_pose))[0]
-                elif self.eval_mode == 'DAP3D':
+                elif self.eval_mode in ['DAP3D_LOC', 'DAP3D_POSE', 'DAP3D_DIM', 'DAP3D']:
                     pred_gtlocpose_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((gt_pred_loc, pred_dim), axis = 1)), torch.Tensor(gt_pred_pose))[0]
                     pred_gtlocdim_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((gt_pred_loc, gt_pred_dim), axis = 1)), torch.Tensor(pred_pose))[0]
                     pred_gtposedim_bbox3D = cubercnn_util.get_cuboid_verts_faces(torch.Tensor(np.concatenate((pred_loc, gt_pred_dim), axis = 1)), torch.Tensor(gt_pred_pose))[0]
@@ -1462,6 +1462,21 @@ class Omni3Deval(COCOeval):
                 ious = box3d_overlap(pred_gtdim_bbox3D.to(device), gg).cpu().numpy()
             elif self.eval_mode == 'GT_POSEDIM':
                 ious = box3d_overlap(pred_gtposedim_bbox3D.to(device), gg).cpu().numpy()
+            elif self.eval_mode == 'DAP3D_LOC':
+                gtlocpose_ious = box3d_overlap(pred_gtlocpose_bbox3D.to(device), gg).cpu().numpy()
+                gtlocdim_ious = box3d_overlap(pred_gtlocdim_bbox3D.to(device), gg).cpu().numpy()
+                gtposedim_ious = np.ones_like(gtlocdim_ious)
+                ious = 0.25 * gtlocpose_ious + 0.25 * gtlocdim_ious + 0.5 * gtposedim_ious
+            elif self.eval_mode == 'DAP3D_POSE':
+                gtlocpose_ious = box3d_overlap(pred_gtlocpose_bbox3D.to(device), gg).cpu().numpy()
+                gtlocdim_ious = np.ones_like(gtlocpose_ious)
+                gtposedim_ious = box3d_overlap(pred_gtposedim_bbox3D.to(device), gg).cpu().numpy()
+                ious = 0.25 * gtlocpose_ious + 0.25 * gtlocdim_ious + 0.5 * gtposedim_ious
+            elif self.eval_mode == 'DAP3D_DIM':
+                gtlocdim_ious = box3d_overlap(pred_gtlocdim_bbox3D.to(device), gg).cpu().numpy()
+                gtlocpose_ious = np.ones_like(gtlocdim_ious)
+                gtposedim_ious = box3d_overlap(pred_gtposedim_bbox3D.to(device), gg).cpu().numpy()
+                ious = 0.25 * gtlocpose_ious + 0.25 * gtlocdim_ious + 0.5 * gtposedim_ious
             elif self.eval_mode == 'DAP3D':
                 gtlocpose_ious = box3d_overlap(pred_gtlocpose_bbox3D.to(device), gg).cpu().numpy()
                 gtlocdim_ious = box3d_overlap(pred_gtlocdim_bbox3D.to(device), gg).cpu().numpy()
