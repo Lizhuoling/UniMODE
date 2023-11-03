@@ -1,4 +1,4 @@
-exp_id=bev_convnext_deformable_mutual
+exp_id=bev_convnext_deformable_scratch
 
 CUDA_VISIBLE_DEVICES=0 python tools/train_net.py \
   --eval-only \

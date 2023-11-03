@@ -15,6 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.batchnorm import _BatchNorm
 import warnings
+import pdb
 import torch.utils.checkpoint as cp
 
 VoVNet19_slim_dw_eSE = {
@@ -297,7 +298,7 @@ class VoVNet(BaseModule):
         super(VoVNet, self).__init__(init_cfg)
         self.frozen_stages = frozen_stages
         self.norm_eval = norm_eval
-
+        pdb.set_trace()
         if isinstance(pretrained, str):
             warnings.warn('DeprecationWarning: pretrained is deprecated, '
                           'please use "init_cfg" instead')

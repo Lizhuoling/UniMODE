@@ -62,16 +62,6 @@ MODEL:
       LLS_SPARSE: 1e-3
       NAIVE_DEPTH_HEAD: False
 
-      CENTER_PROPOSAL:
-        USE_CENTER_PROPOSAL: False
-        FOCAL_DECOUPLE: True
-        VIRTUAL_FOCAL_Y: 512.0
-        PROPOSAL_NUMBER: 100
-        OBJ_LOSS_WEIGHT: 1.0
-        DEPTH_LOSS_WEIGHT: 0.2
-        OFFSET_LOSS_WEIGHT: 1.0
-        PROPOSAL_CONF_THRE: 0.2
-
       HEAD:
         UNCERN_RANGE: [-10, 10]
         CLS_WEIGHT: 2.0
