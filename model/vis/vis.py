@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import pdb
 import math
 import torch
 from copy import deepcopy
@@ -176,7 +177,8 @@ def visualize_from_instances(detections, dataset, dataset_name, min_size_test, o
             # let us visualize the detections now
             if write_sample and score > thres:
                 color = util.get_color(instance['category_id'])
-                draw_3d_box(im, K, [x3d, y3d, z3d, w3d, h3d, l3d], ry3d, color=color, thickness=int(np.round(3*im.shape[0]/500)), draw_back=False)
+                #draw_3d_box(im, K, [x3d, y3d, z3d, w3d, h3d, l3d], ry3d, color=color, thickness=int(np.round(3*im.shape[0]/500)), draw_back=False)
+                draw_3d_box(im, K, None, [x3d, y3d, z3d, w3d, h3d, l3d], ry3d, color=color, thickness=int(np.round(3*im.shape[0]/500)), draw_face = True, category_color = False)
                 draw_text(im, '{}, z={:.1f}, s={:.2f}'.format(cat, z3d, score), [x1, y1, w, h], scale=0.50*im.shape[0]/500, bg_color=color)
 
         if write_sample:
@@ -297,7 +299,7 @@ def draw_scene_view(im, K, meshes, text=None, scale=1000, R=None, T=None, zoom_f
                 draw_3d_box_from_verts(
                     im_drawn_rgb, K, verts3D, color=color, 
                     thickness=max(2, int(np.round(3*im_drawn_rgb.shape[0]/1250))), 
-                    draw_back=False, draw_top=False, zplane=zplane
+                    draw_face = True, zplane=zplane
                 )
 
                 x1 = verts2D[0, :].min() #min(verts2D[0, (verts2D[0, :] > 0) & (verts2D[0, :] < im_drawn_rgb.shape[1])])
@@ -520,7 +522,7 @@ def draw_scene_view(im, K, meshes, text=None, scale=1000, R=None, T=None, zoom_f
                 draw_3d_box_from_verts(
                     im_novel_view, K_novelview, verts3D, color=color, 
                     thickness=max(2, int(np.round(3*im_novel_view.shape[0]/1250))), 
-                    draw_back=False, draw_top=False, zplane=zplane
+                    draw_face = True, zplane=zplane
                 )
                 
                 x1 = verts2D[0, :].min() 
@@ -568,7 +570,7 @@ def draw_transparent_polygon(im, verts, blend=0.5, color=(0, 255, 255)):
     im[mask, 2] = im[mask, 2] * blend + (1 - blend) * color[2]
 
 
-def draw_3d_box_from_verts(im, K, verts3d, color=(0, 200, 200), thickness=1, draw_back=False, draw_top=False, zplane=0.05, eps=1e-4):
+def draw_3d_box_from_verts(im, K, verts3d, color=(0, 200, 200), thickness=1, draw_face = False, zplane=0.05, eps=1e-4):
     """
     Draws a scene from multiple different modes. 
     Args:
@@ -577,8 +579,7 @@ def draw_3d_box_from_verts(im, K, verts3d, color=(0, 200, 200), thickness=1, dra
         verts3d (array): the 8x3 matrix of vertices in camera space
         color (tuple): color in RGB scaled [0, 255)
         thickness (float): the line thickness for opencv lines
-        draw_back (bool): whether a backface should be highlighted
-        draw_top (bool): whether the top face should be highlighted
+        draw_face (bool): whether the faces of a box should be highlighted
         zplane (float): a plane of depth to solve intersection when
             vertex points project behind the camera plane. 
     """
@@ -592,9 +593,8 @@ def draw_3d_box_from_verts(im, K, verts3d, color=(0, 200, 200), thickness=1, dra
     # reorder
     bb3d_lines_verts = [[0, 1], [1, 2], [2, 3], [3, 0], [1, 5], [5, 6], [6, 2], [4, 5], [4, 7], [6, 7], [0, 4], [3, 7]]
     
-    # define back and top vetice planes
-    back_idxs = [4, 0, 3, 7]
-    top_idxs = [4, 0, 1, 5]
+    if draw_face:
+        face_idxs = [[4, 0, 3, 7], [5, 1, 0, 4], [6, 2, 1, 5], [7, 3, 2, 6], [7, 4, 5, 6], [3, 0, 1, 2]]
     
     for (i, j) in bb3d_lines_verts:
         v0 = verts3d[i]
@@ -626,10 +626,12 @@ def draw_3d_box_from_verts(im, K, verts3d, color=(0, 200, 200), thickness=1, dra
             )
 
     # dont draw  the planes if a vertex is out of bounds
-    draw_back &= np.all(verts3d[back_idxs, -1] >= zplane)
-    draw_top &= np.all(verts3d[top_idxs, -1] >= zplane)
+    face_draw_flags = []
+    for face_idx in face_idxs:
+        face_draw_flags.append(draw_face & np.all(verts3d[face_idx, -1] >= zplane))
 
-    if draw_back or draw_top:
+    for cnt, draw_flag in enumerate(face_draw_flags):
+        if not draw_flag: continue
         
         # project to image
         verts2d = (K @ verts3d.T).T
@@ -638,17 +640,20 @@ def draw_3d_box_from_verts(im, K, verts3d, color=(0, 200, 200), thickness=1, dra
         if type(verts2d) == torch.Tensor:
             verts2d = verts2d.detach().cpu().numpy()
 
-        if draw_back:
-            draw_transparent_polygon(im, verts2d[back_idxs, :2], blend=0.5, color=color)
-
-        if draw_top:
-            draw_transparent_polygon(im, verts2d[top_idxs, :2], blend=0.5, color=color)
+        draw_transparent_polygon(im, verts2d[face_idxs[cnt], :2], blend=0.8, color=color)
     
 
-def draw_3d_box(im, K, box3d, R, color=(0, 200, 200), thickness=1, draw_back=False, draw_top=False, view_R=None, view_T=None):
-
+def draw_3d_box(im, K, category, box3d, R, color=(0, 200, 200), thickness=1, draw_face=False, category_color=False, category_names=None, view_R=None, view_T=None):
     verts2d, verts3d = util.get_cuboid_verts(K, box3d, R, view_R=view_R, view_T=view_T)
-    draw_3d_box_from_verts(im, K, verts3d, color=color, thickness=thickness, draw_back=draw_back, draw_top=draw_top)
+
+    if category_color:  # Determine category color based on class.
+        color = util.get_color(category)
+    draw_3d_box_from_verts(im, K, verts3d, color=color, thickness=thickness, draw_face=draw_face)
+    if category_names != None:
+        class_name = category_names[category]
+        x1 = max(verts2d[:, 0].min().item(), 0)
+        y1 = max(verts2d[:, 1].min().item(), 0)
+        draw_text(im, class_name, [x1, y1, 0, 0], scale=0.50*im.shape[0]/500, bg_color=color)
 
 def draw_text(im, text, pos, scale=0.4, color='auto', font=cv2.FONT_HERSHEY_SIMPLEX, bg_color=(0, 255, 255),
               blend=0.33, lineType=1):
