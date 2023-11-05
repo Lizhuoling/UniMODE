@@ -13,7 +13,7 @@ INPUT:
   COLOR_AUG: True
 
 SOLVER:
-  IMS_PER_BATCH: 4 #128
+  IMS_PER_BATCH: 128
   TYPE: "mmcv_AdamW"
   BASE_LR: 4e-4
   WEIGHT_DECAY: 1e-2
@@ -59,17 +59,6 @@ MODEL:
       FEAT_LEVEL_IDXS: ('stage2', 'stage3', 'stage4', 'stage5')
       DOWNSAMPLE_FACTOR: 16
       LLS_SPARSE: 1e-3
-      NAIVE_DEPTH_HEAD: False
-
-      CENTER_PROPOSAL:
-        USE_CENTER_PROPOSAL: False
-        FOCAL_DECOUPLE: True
-        VIRTUAL_FOCAL_Y: 512.0
-        PROPOSAL_NUMBER: 100
-        OBJ_LOSS_WEIGHT: 1.0
-        DEPTH_LOSS_WEIGHT: 0.2
-        OFFSET_LOSS_WEIGHT: 1.0
-        PROPOSAL_CONF_THRE: 0.2
 
       HEAD:
         UNCERN_RANGE: [-10, 10]
@@ -84,7 +73,7 @@ MODEL:
 
         POSITION_RANGE: [-30, 30, -40, 40, 0, 80]
         GRID_SIZE: [1, 80, 1]
-        D_BOUND: [0.1, 100, 1]
+        D_BOUND: [0.1, 100, 40]
         ENC_CAM_INTRINSIC: True 
 
       POST_PROCESS:

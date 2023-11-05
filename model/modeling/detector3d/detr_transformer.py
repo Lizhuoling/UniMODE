@@ -50,19 +50,13 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, srcs, masks, pos_embeds, query_embed, reg_branches=None, **kwargs):
-        assert len(srcs) == 1
-        src = srcs[0]
-        pos_embed = pos_embeds[0]
-        mask = masks[0]
-
+    def forward(self, src, mask, pos_embed, query_embed, reg_branches=None, **kwargs):
+        c = src.shape[2]
         # flatten NxCxHxW to HWxNxC
-        bs, c, h, w = src.shape
-        src = src.flatten(2).permute(2, 0, 1)   # [bs, c, h, w] -> [h*w, bs, c]
-        pos_embed = pos_embed.flatten(2).permute(2, 0, 1)   # [bs, c, h, w] -> [h*w, bs, c]
+        src = src.permute(1, 0, 2)   # [B, L, C] -> [L, B, C]
+        pos_embed = pos_embed.permute(1, 0, 2)   # [B, L, C] -> [L, B, C]
         query_embed = query_embed.permute(1, 0, 2)   # [bs, num_query, dim] -> [num_query, bs, dim]
         query_embed, tgt = torch.split(query_embed, c, dim=2)   # query_embed shape: (bs, num_query, 2), tgt shape: (bs, num_query, 2)
-        mask = mask.flatten(1)
 
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
         hs = self.decoder(tgt, memory, memory_key_padding_mask=mask, pos=pos_embed, query_pos=query_embed)

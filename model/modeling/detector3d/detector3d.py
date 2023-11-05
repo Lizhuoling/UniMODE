@@ -35,6 +35,7 @@ from model.modeling import neck
 from model.util.util import Converter_key2channel
 from model.util import torch_dist
 from model import util as cubercnn_util
+from model.util.position_encoding import pos3embed
 from model.modeling.detector3d.detr_transformer import build_detr_transformer
 from model.modeling.detector3d.deformable_detr import build_deformable_transformer
 from model.util.util import box_cxcywh_to_xyxy, generalized_box_iou 
@@ -540,18 +541,23 @@ class DETECTOR3D_HEAD(nn.Module):
         self.depth_channels = math.ceil((self.d_bound[1] - self.d_bound[0]) / self.d_bound[2])
         
         if self.cfg.INPUT.INPUT_MODALITY in ('point', 'multi-modal'):
-            self.dim_transform = nn.Conv2d(512, self.embed_dims, kernel_size=1, stride=1, padding=0)
-        if self.cfg.INPUT.INPUT_MODALITY == 'multi-modal':
-            self.bev_modal_fusion = nn.Conv2d(2 * self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0)
+            self.point_dim_transform = nn.Conv2d(512, self.embed_dims, kernel_size=1, stride=1, padding=0)
+        if self.cfg.INPUT.INPUT_MODALITY in ('camera', 'multi-modal'):
+            self.img_dim_transform = nn.Conv2d(512, self.embed_dims, kernel_size=1, stride=1, padding=0)
         
-        self.pos2d_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
-        self.bev_pos2d_encoder = nn.Sequential(
-            nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
-        )
-
-        self.depthnet = DepthNet(in_channels = self.in_channels, mid_channels = self.in_channels, context_channels = self.embed_dims, depth_channels = self.depth_channels, cfg = cfg)
+        if self.cfg.INPUT.INPUT_MODALITY in ('point', 'multi-modal'):
+            self.point_pos_generator = build_positional_encoding(dict(type='SinePositionalEncoding', num_feats=128, normalize=True))
+            self.point_pos_encoder = nn.Sequential(
+                nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+            )
+        if self.cfg.INPUT.INPUT_MODALITY in ('camera', 'multi-modal'):
+            self.img_pos_encoder = nn.Sequential(
+                nn.Conv2d(384 * self.depth_channels, self.embed_dims, kernel_size=1, stride=1, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(self.embed_dims, self.embed_dims, kernel_size=1, stride=1, padding=0),
+            )
 
         self.reference_points = nn.Embedding(self.num_query, 3)
         self.query_embedding = nn.Sequential(
@@ -595,9 +601,6 @@ class DETECTOR3D_HEAD(nn.Module):
         reg_branch = nn.Sequential(*reg_branch)
         self.reg_branches = nn.ModuleList([reg_branch for _ in range(self.num_decoder)])
 
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.MUTUAL_INFO_INPAINT:
-            self.mutual_info_inpainter = MutualInfoInpainter(cfg)
-
         # One-to-one macther
         self.cls_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_WEIGHT
         self.loc_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.LOC_WEIGHT
@@ -637,7 +640,6 @@ class DETECTOR3D_HEAD(nn.Module):
         x_coords = torch.linspace(0, ogfW - 1, fW, dtype=torch.float).view(1, 1, fW).expand(D, fH, fW)
         y_coords = torch.linspace(0, ogfH - 1, fH, dtype=torch.float).view(1, fH, 1).expand(D, fH, fW)
         frustum = torch.stack((x_coords, y_coords, d_coords), -1) # Left shape: (D, H, W, 3)
-        
         return frustum
 
     @torch.no_grad()
@@ -657,32 +659,21 @@ class DETECTOR3D_HEAD(nn.Module):
         img_mask = F.interpolate(img_mask[None], size=cam_feat.shape[-2:])[0].to(torch.bool)  # Left shape: (B, feat_h, feat_w)
 
         if self.cfg.INPUT.INPUT_MODALITY in ('multi-modal', 'camera'):
-            depth_and_feat = self.depthnet(cam_feat, Ks)
-            depth = depth_and_feat[:, :self.depth_channels]
-            depth = depth.softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)
-            cam_feat = depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)]  # Left shape: (B, C, H, W)
+            cam_feat = self.img_dim_transform(cam_feat) # Left shape: (B, C, feat_h, feat_w)
+            _, cam_ch, cam_h, cam_w = cam_feat.shape
+            cam_feat = cam_feat.view(B, cam_ch, cam_h * cam_w).permute(0, 2, 1).contiguous()    # Left shape: (B, feat_h * feat_w, C)
             geom_xyz = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy())    # Left shape: (B, D, H, W, 3)
-            geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
-            B, D, H, W, _ = geom_xyz.shape
-            B_idx = torch.arange(start = 0, end = B, device = geom_xyz.device)
-            D_idx = torch.arange(start = 0, end = D, device = geom_xyz.device)
-            H_idx = torch.arange(start = 0, end = H, device = geom_xyz.device)
-            W_idx = torch.arange(start = 0, end = W, device = geom_xyz.device)
-            B_idx, D_idx, H_idx, W_idx = torch.meshgrid(B_idx, D_idx, H_idx, W_idx)
-            HW_idx = H_idx * W + W_idx
-            BDHW_idx = torch.stack((B_idx, D_idx, HW_idx), dim = -1)    # Left shape: (B, D, H, W, 3)
-            geom_xyz = torch.cat((geom_xyz, BDHW_idx), dim = -1)    # Left shape: (B, D, H, W, 6). The first 3 numbers are voxel x, y, z. The remaning 3 numbers are b, d, hw.
-            outrange_mask = (geom_xyz[..., 0] < 0) | (geom_xyz[..., 0] >= self.voxel_num[0]) | (geom_xyz[..., 1] < 0) | (geom_xyz[..., 1] >= self.voxel_num[1]) | (geom_xyz[..., 2] < 0) | (geom_xyz[..., 2] >= self.voxel_num[2])
-            invalid_mask = img_mask.unsqueeze(1) | outrange_mask
-            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LLS_SPARSE > 0:
-                invalid_mask = invalid_mask | (depth < self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LLS_SPARSE) # Left shape: (B, D, H, W)
-            valid_mask = ~invalid_mask
-            geom_xyz = geom_xyz[valid_mask] # Left shape: (num_proj, 6)
-            voxel_cam_feat = voxel_pooling_train(geom_xyz.int().contiguous(), cam_feat.contiguous(), depth.contiguous(), self.voxel_num).permute(0, 4, 1, 2, 3).contiguous()   # Left shape: (B, C, voxel_z, voxel_y, voxel_x)
-            cam_bev_feat = voxel_cam_feat.sum(3)    # Left shape: (B, C, bev_z, bev_x)
+            cam_pos = self.img_pos_encoder(pos3embed(geom_xyz).permute(0, 1, 4, 2, 3).reshape(B, self.depth_channels * 384, cam_h, cam_w))
+            cam_pos = cam_pos.permute(0, 2, 3, 1).reshape(B, cam_h * cam_w, cam_ch)    # Left shape: (B, feat_h * feat_w, C)
 
         if self.cfg.INPUT.INPUT_MODALITY in  ('multi-modal', 'point'):
-            point_bev_feat = self.dim_transform(point_feat)
+            point_bev_feat = self.point_dim_transform(point_feat)
+            _, point_ch, point_h, point_w = point_bev_feat.shape
+            bev_mask = point_bev_feat.new_zeros(B, point_h, point_w)
+            bev_feat_pos = self.point_pos_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
+            bev_feat_pos = self.point_pos_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
+            point_feat = point_bev_feat.permute(0, 2, 3, 1).reshape(B, point_h * point_w, point_ch)  # Left shape: (B, feat_h * feat_w, C)
+            point_pos = bev_feat_pos.permute(0, 2, 3, 1).reshape(B, point_h * point_w, point_ch)    # Left shape: (B, feat_h * feat_w, C)
 
         # For vis
         '''plt.imshow(point_bev_feat[0].permute(1, 2, 0).mean(2).cpu().numpy()[::-1,], cmap = 'magma')
@@ -692,32 +683,14 @@ class DETECTOR3D_HEAD(nn.Module):
         pdb.set_trace()'''
 
         if self.cfg.INPUT.INPUT_MODALITY == 'camera':
-            bev_feat = cam_bev_feat
+            feat = cam_feat
+            pos = cam_pos
         elif self.cfg.INPUT.INPUT_MODALITY == 'point':
-            bev_feat = point_bev_feat
+            feat = point_feat
+            pos = point_pos
         elif self.cfg.INPUT.INPUT_MODALITY == 'multi-modal':
-            bev_feat = self.bev_modal_fusion(torch.cat((cam_bev_feat, point_bev_feat), dim = 1))
-        
-        bev_mask = bev_feat.new_zeros(B, bev_feat.shape[2], bev_feat.shape[3])
-        bev_feat_pos = self.pos2d_generator(bev_mask) # Left shape: (B, C, bev_z, bev_x)
-        bev_feat_pos = self.bev_pos2d_encoder(bev_feat_pos) # Left shape: (B, C, bev_z, bev_x)
-
-        # Mutual Information Inpaint
-        if self.training and self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.MUTUAL_INFO_INPAINT:
-            cam_valid_mask = (cam_bev_feat.sum(1) != 0) # Left shape: (B, bev_y, bev_x)
-            inpaint_loss = self.mutual_info_inpainter(cam_bev_feat,point_bev_feat, cam_valid_mask, pts_valid_mask)
-        else:
-            inpaint_loss = None
-        
-        # For vis
-        '''depth_map = depth[0].argmax(0).cpu().numpy()
-        plt.imshow(depth_map, cmap = 'magma_r')
-        plt.savefig('depth.png')
-        vis_bev_feat = bev_feat[0].mean(0).detach().cpu().numpy()
-        plt.imshow(vis_bev_feat, cmap = 'magma_r')
-        plt.savefig('vis.png')
-        cv2.imwrite('ori.png', batched_inputs[0]['image'].permute(1, 2, 0).cpu().numpy())
-        pdb.set_trace()'''
+            feat = torch.cat((cam_feat, point_feat), dim = 1)   # Left shape: (B, L, C)
+            pos = torch.cat((cam_pos, point_pos), dim = 1)
 
         reference_points = self.reference_points.weight[None].expand(B, -1, -1)  # Left shape: (B, num_query, 3) 
         query_embeds = self.query_embedding(pos2posemb3d(reference_points))   # Left shape: (B, num_query, L) 
@@ -725,7 +698,7 @@ class DETECTOR3D_HEAD(nn.Module):
 
         query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
 
-        outs_dec = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
+        outs_dec = self.transformer(src = feat, mask = feat.new_zeros(feat.shape[0], feat.shape[1]).bool(), pos_embed = pos, query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
             reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
 
         
@@ -761,7 +734,6 @@ class DETECTOR3D_HEAD(nn.Module):
             'all_bbox_preds': outputs_regs, # outputs_regs shape: (num_dec, B, num_query, pred_attr_num)
             'enc_cls_scores': None,
             'enc_bbox_preds': None,
-            'inpaint_loss' : inpaint_loss,
         }
         
         return outs
@@ -868,10 +840,6 @@ class DETECTOR3D_HEAD(nn.Module):
         loss_dict = {}
         for ele in decoder_loss_dicts:
             loss_dict.update(ele)
-
-        if self.training and self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.MUTUAL_INFO_INPAINT:
-            inpaint_loss = detector_out['inpaint_loss']
-            loss_dict['inpaint_loss'] = inpaint_loss
 
         return loss_dict
         
