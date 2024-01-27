@@ -22,7 +22,7 @@ from detectron2.data import MetadataCatalog
 from model.modeling.detector3d.build import build_3d_detector
 
 @META_ARCH_REGISTRY.register()
-class Omni3DFormer(BaseModule):
+class MM_UniTOD(BaseModule):
     def __init__(self, cfg,):
         super().__init__()
         self.cfg = cfg
