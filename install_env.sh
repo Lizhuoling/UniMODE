@@ -11,12 +11,6 @@ pip install mmdet3d==v1.0.0rc4
 pip install cython opencv-python timm transformers einops ftfy opencv-python-headless tensorboardX tensorflow rope ninja
 pip install 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'
 
-apt-get autoremove nvidia-cuda-toolkit
-# Exit sudo, and add the following to .bashrc
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64
-export PATH=$PATH:/usr/local/cuda/bin
-export CUDA_HOME=/usr/local/cuda
-
 rm -rf detectron2
 git clone https://gitee.com/twilightLZL/detectron2.git
 python -m pip install -e detectron2
@@ -31,7 +25,7 @@ cd ..
 pip install flash-attn==0.2.2
 pip install spconv-cu117
 
-#python setup_voxel_pooling.py develop
+python setup_voxel_pooling.py develop
 
 pip install setuptools==59.5.0
 pip install Pillow==8.2.0

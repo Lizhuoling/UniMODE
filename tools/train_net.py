@@ -189,7 +189,6 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
 
             # forward
             loss_dict = model(data)
-            #continue    # For debug
             losses = sum(loss_dict.values())
 
             # reduce
@@ -434,6 +433,12 @@ def main(args):
             logger.info('Available categories for {}'.format(info['name']))
             logger.info([thing_classes[i] for i in (possible_categories & known_category_training_ids)])
     
+    # This transformation process should only be performed for once.
+    datasets_cls_dict = MetadataCatalog.get('omni3d_model').datasets_cls_dict
+    for dataset_key in datasets_cls_dict.keys():
+        datasets_cls_dict[dataset_key] = [dataset_id_to_contiguous_id[ele] for ele in datasets_cls_dict[dataset_key]]
+    MetadataCatalog.get('omni3d_model').datasets_cls_dict = datasets_cls_dict
+
     '''
     The training loops can attempt to train for N times.
     This catches a divergence or other failure modes. 

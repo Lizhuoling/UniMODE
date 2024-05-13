@@ -103,6 +103,9 @@ class DETECTOR3D(BaseModule):
             pts_neck_cfg = pts_neck_cfgs(cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_NECK, cfg)
             if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.PTS_NECK == 'SECONDFPN':
                 self.pts_neck = mmdet3d_builder.build_neck(pts_neck_cfg)
+
+        if cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            self.center_head = CENTER_HEAD(cfg, in_channels = sum(neck_cfg['out_channels']))
         
         self.detector3d_head = DETECTOR3D_HEAD(cfg, sum(neck_cfg['out_channels']))
 
@@ -164,29 +167,6 @@ class DETECTOR3D(BaseModule):
         masks = self.generate_mask(images)  # Generate image mask for detr. masks shape: (b, h, w)
         ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # (B, 2), width first then height
         
-        # Visualize 3D gt centers using intrisics
-        '''from cubercnn.vis.vis import draw_3d_box
-        batch_id = 0
-        img = batched_inputs[batch_id]['image'].permute(1, 2, 0).contiguous().cpu().numpy()
-        K = Ks[batch_id]
-        gts_2d = batched_inputs[batch_id]['instances']._fields['gt_boxes'].tensor
-        for ele in gts_2d:
-            box2d = ele.cpu().numpy().reshape(2, 2) # The box2d label has been rescaled to the input resolution.
-            box2d = box2d.astype(np.int32)
-            img = cv2.rectangle(img, box2d[0], box2d[1], (0, 255, 0))
-        gts_3d = batched_inputs[batch_id]['instances']._fields['gt_boxes3D']
-        for gt_cnt in range(gts_3d.shape[0]):
-            gt_3d = gts_3d[gt_cnt]
-            gt_center3d = gt_3d[6:9].cpu()
-            gt_dim3d = gt_3d[3:6].cpu()
-            gt_rot3d = batched_inputs[batch_id]['instances']._fields['gt_poses'][gt_cnt].cpu()
-            draw_3d_box(img, K.cpu().numpy(), torch.cat((gt_center3d, gt_dim3d), dim = 0).numpy(), gt_rot3d.numpy()) d
-        #box2d_centers = (batched_inputs[batch_id]['instances']._fields['gt_featreso_box2d_center'] * self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.DOWNSAMPLE_FACTOR).int().cpu().numpy()
-        #for box_center in box2d_centers:
-        #    cv2.circle(img, box_center, radius = 3, color = (0, 0, 255), thickness = -1)
-        print("Whether flip: {}".format(batched_inputs[batch_id]['horizontal_flip_flag']))
-        pdb.set_trace()'''
-        
         if self.cfg.INPUT.INPUT_MODALITY in ['multi-modal', 'camera']:
             cam_feat = self.extract_cam_feat(imgs = images.tensor, batched_inputs = batched_inputs) # (B, C, feat_h, feat_w)
         else:
@@ -195,33 +175,19 @@ class DETECTOR3D(BaseModule):
             point_feat, pts_valid_mask = self.extract_point_feat(points = points)   # Left shape: (B, C, bev_z, bev_x)
         else:
             point_feat, pts_valid_mask = None, None
-
-        # For vis
-        '''bev_range = [-30, 30, 0, 80]
-        scale_factor = 5
-        scale_bev_range = [scale_factor * ele for ele in bev_range] 
-        bev_points = torch.cat((points[0][:, 0:1], points[0][:, 2:3]), axis = -1).cpu().numpy()
-        bev_points[:, 0] -= bev_range[0]
-        bev_points[:, 1] -= bev_range[2]
-        vis_bev_feat = np.zeros((scale_bev_range[3] - scale_bev_range[2], scale_bev_range[1] - scale_bev_range[0], 3), dtype = np.float32)
-        for point in bev_points:
-            if point[0] >= (bev_range[1]-bev_range[0]-1) or point[0] <= 0 or point[1] >= (bev_range[3]-bev_range[2]-1) or point[1] <= 0: continue
-            r = int(point[1] / bev_range[-1] * 255)
-            g = 255
-            color = (0, g, r)
-            vis_bev_feat[round(scale_factor * point[1]), round(scale_factor * point[0])] = color
-            #cv2.circle(vis_bev_feat, (round(scale_factor * point[0]),round(scale_factor * point[1])), radius = 1, color = color, thickness = -1)
-        vis_bev_feat = vis_bev_feat[::-1, :].astype(np.uint8)
-        cv2.imwrite('point_vis.png', vis_bev_feat)
-        img = batched_inputs[0]['image'].permute(1, 2, 0).contiguous().numpy()
-        cv2.imwrite('img_vis.png', img)
-        pdb.set_trace()'''
         
-        petr_out = self.detector3d_head(cam_feat, point_feat, pts_valid_mask, Ks, scale_ratios, masks, batched_inputs, 
+        if self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            center_head_out = self.center_head(cam_feat, Ks, batched_inputs)
+        else:
+            center_head_out = None
+        
+        detector_out = self.detector3d_head(cam_feat, point_feat, pts_valid_mask, Ks, scale_ratios, masks, batched_inputs, 
             ori_img_resolution = ori_img_resolution, 
+            center_head_out = center_head_out,
         )
         detector_out = dict(
-            petr_out = petr_out,
+            detector_out = detector_out,
+            center_head_out = center_head_out,
             Ks = Ks,
         )
 
@@ -231,11 +197,14 @@ class DETECTOR3D(BaseModule):
             return self.inference(detector_out, batched_inputs, ori_img_resolution)
 
     def loss(self, detector_out, batched_inputs, ori_img_resolution):
-        loss_dict = self.detector3d_head.loss(detector_out['petr_out'], batched_inputs, ori_img_resolution)
+        loss_dict = self.detector3d_head.loss(detector_out['detector_out'], batched_inputs, ori_img_resolution)
+        if self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            center_head_loss_dict = self.center_head.loss(detector_out['center_head_out'], detector_out['Ks'], batched_inputs)
+            loss_dict.update(center_head_loss_dict)
         return loss_dict
     
     def inference(self, detector_out, batched_inputs, ori_img_resolution):
-        inference_results = self.detector3d_head.inference(detector_out['petr_out'], batched_inputs, ori_img_resolution)
+        inference_results = self.detector3d_head.inference(detector_out['detector_out'], batched_inputs, ori_img_resolution)
         return inference_results
 
     def transform_intrinsics(self, images, batched_inputs):
@@ -504,6 +473,15 @@ class DETECTOR3D_HEAD(nn.Module):
         self.cfg = cfg
         self.in_channels = in_channels
 
+        if cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_MASK > 0:
+            datasets_cls_dict = MetadataCatalog.get('omni3d_model').datasets_cls_dict
+            total_cls_num = len(MetadataCatalog.get('omni3d_model').thing_dataset_id_to_contiguous_id)
+            self.datasets_cls_mask = {}
+            for dataset_id in datasets_cls_dict.keys():
+                cls_mask = torch.zeros((total_cls_num,), dtype = torch.bool)
+                cls_mask[datasets_cls_dict[dataset_id]] = True
+                self.datasets_cls_mask[dataset_id] = cls_mask
+
         assert len(set(cfg.DATASETS.CATEGORY_NAMES)) == len(cfg.DATASETS.CATEGORY_NAMES)
         self.total_cls_num = len(cfg.DATASETS.CATEGORY_NAMES)
         self.num_query = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.NUM_QUERY
@@ -521,6 +499,15 @@ class DETECTOR3D_HEAD(nn.Module):
         self.register_buffer('voxel_size', torch.Tensor([row[2] for row in [self.x_bound, self.y_bound, self.z_bound]]))
         self.register_buffer('voxel_coord', torch.Tensor([row[0] + row[2] / 2.0 for row in [self.x_bound, self.y_bound, self.z_bound]]))
         self.register_buffer('voxel_num', torch.LongTensor([(row[1] - row[0]) / row[2]for row in [self.x_bound, self.y_bound, self.z_bound]]))
+
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LID:
+            coor_z_start, coor_z_end, coor_z_interval =  self.position_range[4], self.position_range[5], cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.GRID_SIZE[2]
+            coor_z_num = math.ceil((coor_z_end - coor_z_start) / coor_z_interval)
+            self.coor_z_num = coor_z_num
+            coor_z_index  = torch.arange(start=0, end=coor_z_num, step=1).float()
+            coor_z_index_1 = coor_z_index + 1
+            coor_z_bin_size = (coor_z_end - coor_z_start) / (coor_z_num * (1 + coor_z_num))
+            self.coor_z_coords = coor_z_start + coor_z_bin_size * coor_z_index * coor_z_index_1    # Left shape: (bev_z,)
 
         assert len(cfg.INPUT.RESIZE_TGT_SIZE) == 2
         img_shape_after_aug = cfg.INPUT.RESIZE_TGT_SIZE
@@ -545,6 +532,14 @@ class DETECTOR3D_HEAD(nn.Module):
         )
 
         self.depthnet = DepthNet(in_channels = self.in_channels, mid_channels = self.in_channels, context_channels = self.embed_dims, depth_channels = self.depth_channels, cfg = cfg)
+
+        if self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            self.center_conf_emb = nn.Linear(1, self.embed_dims)
+            self.center_xyz_emb = nn.Sequential(
+                nn.Linear(self.embed_dims*3//2, self.embed_dims),
+                nn.ReLU(),
+                nn.Linear(self.embed_dims, self.embed_dims),
+            )
 
         self.reference_points = nn.Embedding(self.num_query, 3)
         self.query_embedding = nn.Sequential(
@@ -642,7 +637,7 @@ class DETECTOR3D_HEAD(nn.Module):
         points = (Ks.inverse() @ points).squeeze(-1)    # Left shape: (B, D, H, W, 3)
         return points
 
-    def forward(self, cam_feat, point_feat, pts_valid_mask, Ks, scale_ratios, img_mask, batched_inputs, ori_img_resolution):
+    def forward(self, cam_feat, point_feat, pts_valid_mask, Ks, scale_ratios, img_mask, batched_inputs, ori_img_resolution, center_head_out):
         if cam_feat != None:
             B = cam_feat.shape[0]
         else:
@@ -655,7 +650,14 @@ class DETECTOR3D_HEAD(nn.Module):
             depth = depth.softmax(dim=1, dtype=depth_and_feat.dtype)  # Left shape: (B, depth_bin, H, W)
             cam_feat = depth_and_feat[:, self.depth_channels:(self.depth_channels + self.embed_dims)]  # Left shape: (B, C, H, W)
             geom_xyz = self.get_geometry(Ks, B, ori_img_resolution[0].int().cpu().numpy())    # Left shape: (B, D, H, W, 3)
-            geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
+
+            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LID:
+                geom_xyz = geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)
+                geom_xy = (geom_xyz[..., :2] / self.voxel_size[:2]).int()    # Left shape: (B, D, H, W, 2)
+                geom_z = (geom_xyz[..., 2:].unsqueeze(-1) >= self.coor_z_coords.cuda().view(1, 1, 1, 1, 1, -1)).int().sum(-1) - 1   # Left shape: (B, D, H, W, 1)
+                geom_xyz = torch.cat((geom_xy, geom_z), dim = -1).int()   # Left shape: (B, D, H, W, 3)
+            else:
+                geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) / self.voxel_size).int()    # Left shape: (B, D, H, W, 3)
             B, D, H, W, _ = geom_xyz.shape
             B_idx = torch.arange(start = 0, end = B, device = geom_xyz.device)
             D_idx = torch.arange(start = 0, end = D, device = geom_xyz.device)
@@ -677,13 +679,6 @@ class DETECTOR3D_HEAD(nn.Module):
         if self.cfg.INPUT.INPUT_MODALITY in  ('multi-modal', 'point'):
             point_bev_feat = self.dim_transform(point_feat)
 
-        # For vis
-        '''plt.imshow(point_bev_feat[0].permute(1, 2, 0).mean(2).cpu().numpy()[::-1,], cmap = 'magma')
-        plt.xticks([])
-        plt.yticks([])
-        plt.savefig('bev_vis.png', bbox_inches='tight')
-        pdb.set_trace()'''
-
         if self.cfg.INPUT.INPUT_MODALITY == 'camera':
             bev_feat = cam_bev_feat
         elif self.cfg.INPUT.INPUT_MODALITY == 'point':
@@ -703,27 +698,29 @@ class DETECTOR3D_HEAD(nn.Module):
             MII_loss = self.mutual_info_inpainter(cam_bev_feat, point_bev_feat, updated_img_feat, updated_point_feat, cam_valid_mask, pts_valid_mask)
         else:
             MII_loss = None
-        
-        # For vis
-        '''depth_map = depth[0].argmax(0).cpu().numpy()
-        plt.imshow(depth_map, cmap = 'magma_r')
-        plt.savefig('depth.png')
-        vis_bev_feat = bev_feat[0].mean(0).detach().cpu().numpy()
-        plt.imshow(vis_bev_feat, cmap = 'magma_r')
-        plt.savefig('vis.png')
-        cv2.imwrite('ori.png', batched_inputs[0]['image'].permute(1, 2, 0).cpu().numpy())
-        pdb.set_trace()'''
 
         reference_points = self.reference_points.weight[None].expand(B, -1, -1)  # Left shape: (B, num_query, 3) 
         query_embeds = self.query_embedding(pos2posemb3d(reference_points))   # Left shape: (B, num_query, L) 
         tgt = self.tgt_embed.weight[None].expand(B, -1, -1) # Left shape: (B, num_query, L)
 
+        if self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.USE_CENTER_PROPOSAL:
+            center_conf_pred = center_head_out['topk_center_conf'].detach()  # Left shape: (B, num_proposal, 1)
+            topk_center_xyz = center_head_out['topk_center_xyz'].detach()    # Left shape: (B, num_proposal, 3)
+            center_conf_emb = self.center_conf_emb(center_conf_pred)    # Left shape: (B, num_proposal, L)
+            center_xyz_emb = self.center_xyz_emb(pos2posemb3d(topk_center_xyz))  # Left shape: (B, num_proposal, L)
+            center_proposal_num = center_conf_emb.shape[1]
+            center_initialized_tgt = tgt[:, :center_proposal_num].clone() + center_conf_emb + center_xyz_emb
+            tgt = torch.cat((center_initialized_tgt, tgt[:, center_proposal_num:]), dim = 1) # Left shape: (B, num_query, L) 
+
         query_embeds = torch.cat((query_embeds, tgt), dim = -1)    # Left shape: (B, num_query, 2 * L)
 
-        outs_dec = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
-            reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
-
+        if self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.ADAPT_LN:
+            dataset_group_pred = center_head_out['dataset_group_pred'].softmax(dim=-1)
+        else:
+            dataset_group_pred = None
         
+        outs_dec = self.transformer(srcs = [bev_feat], masks = [bev_mask.bool()], pos_embeds = [bev_feat_pos], query_embed = query_embeds, reg_branches = self.reg_branches, reference_points = reference_points, \
+            dataset_group_pred = dataset_group_pred, reg_key_manager = self.reg_key_manager, ori_img_resolution = ori_img_resolution)
         outs_dec = torch.nan_to_num(outs_dec)
 
         outputs_classes = []
@@ -750,6 +747,13 @@ class DETECTOR3D_HEAD(nn.Module):
             (self.position_range[3] - self.position_range[2]) + self.position_range[2]
         outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
             (self.position_range[5] - self.position_range[4]) + self.position_range[4]
+        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.LID:
+            pred_z = outputs_regs[..., self.reg_key_manager('loc')][..., 2].clone()
+            pred_z = (pred_z * pred_z + pred_z) / 2 # Left shape: (num_dec, B, num_query)
+            outputs_regs[..., self.reg_key_manager('loc')][..., 2] = pred_z * (self.position_range[5] - self.position_range[4]) + self.position_range[4]
+        else:
+            outputs_regs[..., self.reg_key_manager('loc')][..., 2] = outputs_regs[..., self.reg_key_manager('loc')][..., 2] * \
+                (self.position_range[5] - self.position_range[4]) + self.position_range[4]
         
         outs = {
             'all_cls_scores': outputs_classes,  # outputs_classes shape: (num_dec, B, num_query, cls_num)
@@ -803,26 +807,6 @@ class DETECTOR3D_HEAD(nn.Module):
             corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_pred_3D_center, bs_pred_dims), dim = 1), R = bs_pred_pose)
             corners_2d = corners_2d[:, :, :2]
             bs_pred_2ddet = torch.cat((corners_2d.min(dim = 1)[0], corners_2d.max(dim = 1)[0]), dim = -1)   # Left shape: (valid_query_num, 4). Predicted 2D box in the original image resolution.
-
-            # For debug
-            '''from cubercnn.vis.vis import draw_3d_box
-            img = batched_inputs[0]['image'].permute(1, 2, 0).numpy()
-            img = np.ascontiguousarray(img)
-            img_reso = torch.cat((ori_img_resolution[bs], ori_img_resolution[bs]), dim = 0)
-            initial_w, initial_h = batched_inputs[bs]['width'], batched_inputs[bs]['height']
-            initial_reso = torch.Tensor([initial_w, initial_h, initial_w, initial_h]).to(img_reso.device)
-            Ks[0, :] = Ks[0, :] * ori_img_resolution[bs][0] / initial_w
-            Ks[1, :] = Ks[1, :] * ori_img_resolution[bs][1] / initial_h
-            corners_2d, corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_pred_3D_center, bs_pred_dims), dim = 1), R = bs_pred_pose)
-            corners_2d = corners_2d[:, :, :2].detach()
-            box2d = torch.cat((corners_2d.min(dim = 1)[0], corners_2d.max(dim = 1)[0]), dim = -1)
-            for box in box2d:
-                box = box.detach().cpu().numpy().astype(np.int32)
-                cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 2)
-            for idx in range(bs_pred_3D_center.shape[0]):
-                draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_pred_3D_center[idx].detach().cpu(), bs_pred_dims[idx].detach().cpu()), dim = 0).numpy(), bs_pred_pose[idx].detach().cpu().numpy())
-            cv2.imwrite('vis.png', img)
-            pdb.set_trace()'''
 
             # Obtain the projected 3D center on the original image resolution without augmentation
             proj_centers_3d = (Ks @ bs_pred_3D_center.unsqueeze(-1)).squeeze(-1)    # Left shape: (valid_query_num, 3)
@@ -906,47 +890,15 @@ class DETECTOR3D_HEAD(nn.Module):
             bs_loc_gts = bs_gt_instance.get('gt_boxes3D')[..., 6:9].to(device)[gt_idxs] # Left shape: (num_gt, 3)
             bs_dim_gts = bs_gt_instance.get('gt_boxes3D')[..., 3:6].to(device)[gt_idxs] # Left shape: (num_gt, 3)
             bs_pose_gts = bs_gt_instance.get('gt_poses').to(device)[gt_idxs] # Left shape: (num_gt, 3, 3)
-
-            # For debug
-            '''from cubercnn.vis.vis import draw_3d_box
-            img = batched_inputs[bs]['image'].permute(1, 2, 0).numpy()
-            img = np.ascontiguousarray(img)
-            img_reso = torch.cat((ori_img_resolution[bs], ori_img_resolution[bs]), dim = 0)
-            initial_w, initial_h = batched_inputs[bs]['width'], batched_inputs[bs]['height']
-            initial_reso = torch.Tensor([initial_w, initial_h, initial_w, initial_h]).to(img_reso.device)
-            Ks = torch.Tensor(np.array(batched_inputs[bs]['K'])).cuda()
-            Ks[0, :] = Ks[0, :] * ori_img_resolution[bs][0] / initial_w
-            Ks[1, :] = Ks[1, :] * ori_img_resolution[bs][1] / initial_h
-            # draw predictions
-            #pred_corners_2d, pred_corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_preds, bs_dim_preds.exp()), dim = 1), R = bs_pose_preds)
-            #pred_corners_2d = pred_corners_2d[:, :, :2].detach()
-            #pred_box2d = torch.cat((pred_corners_2d.min(dim = 1)[0], pred_corners_2d.max(dim = 1)[0]), dim = -1)
-            #for box in pred_box2d:
-            #    box = box.detach().cpu().numpy().astype(np.int32)
-            #    cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
-            #for idx in range(bs_loc_preds.shape[0]):
-            #    draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_preds[idx].detach().cpu(), bs_dim_preds[idx].exp().detach().cpu()), dim = 0).numpy(), bs_pose_preds[idx].detach().cpu().numpy(), color=(0,255,0), thickness=2)
-            # draw labels
-            gt_corners_2d, gt_corners_3d = get_cuboid_verts(K = Ks, box3d = torch.cat((bs_loc_gts, bs_dim_gts), dim = 1), R = bs_pose_gts)
-            gt_corners_2d = gt_corners_2d[:, :, :2].detach()
-            gt_box2d = torch.cat((gt_corners_2d.min(dim = 1)[0], gt_corners_2d.max(dim = 1)[0]), dim = -1)
-            #for box in gt_box2d:
-            #    box = box.detach().cpu().numpy().astype(np.int32)
-            #    cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (255, 0, 0), 2)
-            for idx in range(bs_loc_gts.shape[0]):
-                draw_3d_box(img, Ks.cpu().numpy(), torch.cat((bs_loc_gts[idx].detach().cpu(), bs_dim_gts[idx].detach().cpu()), dim = 0).numpy(), bs_pose_gts[idx].detach().cpu().numpy(), color=(0,0,255), thickness=2)
-            gt_boxes3D = batched_inputs[bs]['instances']._fields['gt_boxes3D']
-            #gt_proj_centers = gt_boxes3D[:, 0:2]    # The projected 3D centers have been resized.
-            #for gt_proj_center in gt_proj_centers:
-            #    cv2.circle(img, gt_proj_center.cpu().numpy().astype(np.int32), radius = 3, color = (0, 0, 255), thickness = -1)
-            cv2.imwrite('vis.png', img)
-            pdb.set_trace()'''
             
             # Classification loss
             bs_cls_gts_onehot = bs_cls_gts.new_zeros((self.num_query, self.total_cls_num))   # Left shape: (num_query, num_cls)
             bs_valid_cls_gts_onehot = F.one_hot(bs_cls_gts, num_classes = self.total_cls_num) # Left shape: (num_gt, num_cls)
             bs_cls_gts_onehot[pred_idxs] = bs_valid_cls_gts_onehot
             cls_loss_matrix = torchvision.ops.sigmoid_focal_loss(bs_cls_scores, bs_cls_gts_onehot.float(), reduction = 'none')  # Left shape: (num_query, num_cls)
+            if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_MASK > 0:
+                valid_cls_mask = self.datasets_cls_mask[batched_inputs[bs]['dataset_id']].cuda()    # Left shape: (num_cls,) 
+                cls_loss_matrix = cls_loss_matrix * valid_cls_mask[None] + self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.HEAD.CLS_MASK * (cls_loss_matrix * ~valid_cls_mask[None])
             loss_dict['cls_loss_{}'.format(dec_idx)] += self.cls_weight * cls_loss_matrix.sum()
             
             # Localization loss

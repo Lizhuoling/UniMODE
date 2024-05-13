@@ -20,12 +20,12 @@ class CENTER_HEAD(nn.Module):
         self.cfg = cfg
         self.in_channels = in_channels
 
-        self.proposal_number = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.PROPOSAL_NUMBER
         self.downsample_factor = self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.DOWNSAMPLE_FACTOR
+        self.proposal_number = cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.PROPOSAL_NUMBER
+        self.obj_loss_weight = cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.OBJ_LOSS_WEIGHT
+        self.depth_loss_weight = cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.DEPTH_LOSS_WEIGHT
+        self.offset_loss_weight = cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.OFFSET_LOSS_WEIGHT
         self.embed_dims = 256
-        self.obj_loss_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.OBJ_LOSS_WEIGHT
-        self.depth_loss_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.DEPTH_LOSS_WEIGHT
-        self.offset_loss_weight = cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.OFFSET_LOSS_WEIGHT
 
         self.shared_conv = nn.Sequential(
             nn.Conv2d(in_channels, self.embed_dims, kernel_size=1, padding=1 // 2, bias=True),
@@ -47,8 +47,22 @@ class CENTER_HEAD(nn.Module):
             nn.Conv2d(self.embed_dims, 2, kernel_size=1, padding=1 // 2, bias=True),
         )
 
-        self.cls_loss_fnc = FocalLoss(2, 4)
+        if cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.ADAPT_LN:
+            dataset_id_group = cfg.DATASETS.DATASET_ID_GROUP
+            self.dataset_group_num = len(dataset_id_group)
+            self.dataset_id_map = {}
+            for group_idx, group in enumerate(dataset_id_group):
+                for ele in group:
+                    self.dataset_id_map[ele] = group_idx
+            self.dataset_group_head = nn.Sequential(
+                BasicBlock(self.embed_dims, self.embed_dims),
+                nn.AdaptiveMaxPool2d((1, 1)),
+                nn.Conv2d(self.embed_dims, self.dataset_group_num, kernel_size=1, padding=1 // 2, bias=True),
+            ) 
+            self.softmax_se_loss = nn.CrossEntropyLoss()
 
+        self.cls_loss_fnc = FocalLoss(2, 4)
+        
         self.init_weights()
 
     def init_weights(self):
@@ -61,11 +75,13 @@ class CENTER_HEAD(nn.Module):
         obj_pred = sigmoid_hm(self.obj_head(feat))  # Left shape: (B, 1, feat_h, feat_w)
         depth_pred = self.depth_head(feat)  # Left shape: (B, 1, feat_h, feat_w)
         depth_pred = 1 / depth_pred.sigmoid() - 1   # inv_sigmoid decoding
-        if self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.FOCAL_DECOUPLE:
-            virtual_focal_y = self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.VIRTUAL_FOCAL_Y
+        if self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.FOCAL_DECOUPLE:
+            virtual_focal_y = self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.VIRTUAL_FOCAL_Y
             real_focal_y = Ks[:, 1, 1]
             depth_pred = depth_pred * real_focal_y[:, None, None, None] / virtual_focal_y
         offset_pred = self.offset_head(feat)    # Left shape: (B, 2, feat_h, feat_w)
+        if self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.ADAPT_LN:
+            dataset_group_pred = self.dataset_group_head(feat)[:, :, 0, 0]  # Left shape: (B, group_num)
 
         bs, _, feat_h, feat_w = obj_pred.shape
 
@@ -110,13 +126,12 @@ class CENTER_HEAD(nn.Module):
                 tgt_xyz_preds.append(tgt_3dcenter_xyz_pred)
         else:
             # During inference, we obtain proposal points by confidence filtering
-            valid_proposal_mask = (center_conf > self.cfg.MODEL.DETECTOR3D.TRANSFORMER_DETECTOR.CENTER_PROPOSAL.PROPOSAL_CONF_THRE).squeeze(-1) # Left shape: (B, valid_proposal_num)
+            valid_proposal_mask = (center_conf > self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.PROPOSAL_CONF_THRE).squeeze(-1) # Left shape: (B, valid_proposal_num)
             for bs_idx, bs_mask in enumerate(valid_proposal_mask):
                 bs_valid_center_conf = center_conf[bs_idx][bs_mask]
                 tgt_conf_preds.append(bs_valid_center_conf) # Left shape: (num_valid_proposal, 1)
                 bs_valid_center_xyz = center_xyz[bs_idx][bs_mask] # Left shape: (num_valid_proposal, 3)
                 tgt_xyz_preds.append(bs_valid_center_xyz)
-
 
         center_head_out = dict(
             obj_pred = obj_pred,    # Used for computing loss.
@@ -127,6 +142,8 @@ class CENTER_HEAD(nn.Module):
             tgt_depth_preds = tgt_depth_preds,  # Used for computing loss.
             tgt_offset_preds = tgt_offset_preds,    # Used for computing loss.
         )
+        if self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.ADAPT_LN:
+            center_head_out.update(dataset_group_pred = dataset_group_pred)
 
         return center_head_out
 
@@ -145,6 +162,16 @@ class CENTER_HEAD(nn.Module):
         for key in loss_info_all_batch[0].keys():
             if key != 'num_gt':
                 loss_dict[key] = sum([ele[key] for ele in loss_info_all_batch]) / total_num_gt
+
+        if self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.ADAPT_LN:
+            dataset_group_pred = center_head_out['dataset_group_pred']  # Left shape: (B, group_num)
+            # Prepare labels
+            dataset_group_gt = []
+            for batch_input in batched_inputs:
+                dataset_group_gt.append(self.dataset_id_map[batch_input['dataset_id']])
+            dataset_group_gt = torch.tensor(dataset_group_gt, dtype = torch.long).to(dataset_group_pred.device) # Left shape: (B,)
+            dataset_group_loss = self.softmax_se_loss(dataset_group_pred, dataset_group_gt)
+            loss_dict['dataset_group_loss'] = dataset_group_loss
 
         return loss_dict
 

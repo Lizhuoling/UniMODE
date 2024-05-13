@@ -157,6 +157,7 @@ class Omni3D(COCO):
         
         cats_ids_master = []
         cats_master = []
+        datasets_cls_dict = {}
 
         datasets_info = []
         datasets_anno = []
@@ -174,6 +175,12 @@ class Omni3D(COCO):
 
             if type(dataset['info']) == list:
                 dataset['info'] = dataset['info'][0]
+
+            cls_id_map = []
+            for ele in dataset['categories']:
+                if ele['name'] in filter_settings['category_names']:
+                    cls_id_map.append(ele['id'])
+            datasets_cls_dict[dataset['info']['id']] = cls_id_map
                 
             dataset['info']['known_category_ids'] = [cat['id'] for cat in dataset['categories']]
 
@@ -285,6 +292,10 @@ class Omni3D(COCO):
                     valid_anns.append(self.dataset['annotations'][anno_idx])
 
             self.dataset['annotations'] = valid_anns
+
+        # Only for training.
+        if MetadataCatalog.get('omni3d_model').get('datasets_cls_dict') == None:
+            MetadataCatalog.get('omni3d_model').datasets_cls_dict = datasets_cls_dict
 
         self.createIndex()
 

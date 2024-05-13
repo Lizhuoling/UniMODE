@@ -193,15 +193,6 @@ def build_detection_train_loader(dataset, *, mapper, sampler=None, total_batch_s
         num_workers=num_workers
     )
 
-    # For debug
-    '''sampler = InferenceSampler(len(dataset))
-    batch_sampler = torch.utils.data.sampler.BatchSampler(sampler, 1, drop_last=False)
-    data_loader = torch.utils.data.DataLoader(
-        dataset,
-        num_workers=num_workers,
-        batch_sampler=batch_sampler,
-        collate_fn=trivial_batch_collator,
-    )'''
     return data_loader
 
 def _test_loader_from_config(cfg, dataset_name, mapper=None):

@@ -1,4 +1,4 @@
-exp_id=MM_UniTOD
+exp_id=MM_UniMODE
 
 CUDA_VISIBLE_DEVICES=1 python tools/train_net.py \
   --eval-only \

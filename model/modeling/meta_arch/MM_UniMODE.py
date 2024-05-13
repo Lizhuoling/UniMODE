@@ -22,7 +22,7 @@ from detectron2.data import MetadataCatalog
 from model.modeling.detector3d.build import build_3d_detector
 
 @META_ARCH_REGISTRY.register()
-class MM_UniTOD(BaseModule):
+class MM_UniMODE(BaseModule):
     def __init__(self, cfg,):
         super().__init__()
         self.cfg = cfg
@@ -33,33 +33,7 @@ class MM_UniTOD(BaseModule):
         ### Build the 3D Det model ###
         self.detector = build_3d_detector(cfg)
 
-        # For debug
-        '''self.cnt_range = np.array([-60, 60, -30, 30, 0, 100])
-        self.cnt_array = np.zeros((120, 60, 100), dtype = np.int32)
-        self.img_cnt = 0'''
-
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
-
-        # For survey the data statistics. For debug
-        '''for batch in batched_inputs:
-            xyz = batch['instances'].gt_boxes3D[:, 6:9] # 9 numbers in gt_boxes3D: projected 2D center, depth, w, h, l, 3D center
-            xyz_in_range = (xyz[:, 0] > self.cnt_range[0] + 1) & (xyz[:, 0] < self.cnt_range[1] - 1) & \
-                (xyz[:, 1] > self.cnt_range[2] + 1) & (xyz[:, 1] < self.cnt_range[3] - 1) & \
-                (xyz[:, 2] > self.cnt_range[4] + 1) & (xyz[:, 2] < self.cnt_range[5] - 1)
-            xyz = xyz[xyz_in_range].numpy()
-            xyz = xyz - self.cnt_range[None, ::2]
-            xyz_coor = np.around(xyz).astype(np.int32)
-            for ele in xyz_coor:   
-                self.cnt_array[ele[0], ele[1], ele[2]] += 1
-            self.img_cnt += 1
-            if self.img_cnt % 1000 == 0:
-                print("Progress: {}/100000".format(self.img_cnt))
-            if self.img_cnt % 10000 == 0:
-                np.save('ARKitScenes_statistics.npy', self.cnt_array)
-            if self.img_cnt >= 30000:
-                pdb.set_trace()
-        return'''
-        
         images = self.preprocess_image(batched_inputs)
         points = [batch_input['point_cloud'].cuda() for batch_input in batched_inputs]
         ori_img_resolution = torch.Tensor([(img.shape[2], img.shape[1]) for img in images]).to(images.device)   # Left shape: (bs, 2)

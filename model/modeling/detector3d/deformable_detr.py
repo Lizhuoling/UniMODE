@@ -45,6 +45,7 @@ class DeformableTransformer(nn.Module):
         self.nhead = nhead
         self.two_stage = two_stage
         self.two_stage_num_proposals = two_stage_num_proposals
+        self.use_dab = use_dab
 
         encoder_layer = DeformableTransformerEncoderLayer(d_model, dim_feedforward, dropout, activation,
                                                         num_feature_levels, nhead, enc_n_points, cfg = cfg)
@@ -58,6 +59,8 @@ class DeformableTransformer(nn.Module):
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
 
         self.high_dim_query_update = high_dim_query_update
+        if high_dim_query_update:
+            assert not self.use_dab, "use_dab must be True"
 
         self._reset_parameters()
 
@@ -96,7 +99,7 @@ class DeformableTransformer(nn.Module):
         return valid_ratio
 
     def forward(self, srcs, masks, pos_embeds, query_embed=None, reg_branches = None, reference_points = None, \
-        reg_key_manager = None,  ori_img_resolution = None,):
+        dataset_group_pred = None, reg_key_manager = None,  ori_img_resolution = None,):
         """
         Input:
             - srcs: List([bs, c, h, w])
@@ -129,20 +132,27 @@ class DeformableTransformer(nn.Module):
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
         
         # encoder
-        memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
+        memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten, dataset_group_pred)
         
         # prepare input for decoder
         bs, _, c = memory.shape
-
-        query_embed, tgt = torch.split(query_embed, c, dim=2)   # query_embed shape: (bs, num_query, 2), tgt shape: (bs, num_query, 2)
+        if self.use_dab:
+            raise Exception("dab is not allowed.")
+            reference_points = query_embed[..., self.d_model:].sigmoid() 
+            tgt = query_embed[..., :self.d_model]
+            tgt = tgt.unsqueeze(0).expand(bs, -1, -1)
+            init_reference_out = reference_points
+        else:
+            query_embed, tgt = torch.split(query_embed, c, dim=2)   # query_embed shape: (bs, num_query, 2), tgt shape: (bs, num_query, 2)
+            init_reference_out = reference_points.clone()   # Left shape: (bs, num_query, 3)
 
         # decoder
         hs, inter_references = self.decoder(tgt, reference_points, memory,
                                             spatial_shapes, level_start_index, valid_ratios, 
-                                            query_pos=query_embed, 
+                                            query_pos=query_embed if not self.use_dab else None, 
                                             src_padding_mask=mask_flatten, reg_branches = reg_branches, reg_key_manager = reg_key_manager, 
-                                            ori_img_resolution = ori_img_resolution)
-        
+                                            ori_img_resolution = ori_img_resolution, dataset_group_pred = dataset_group_pred)
+
         return hs   # hs shape: (num_dec, bs, num_query, L)
 
 class DeformableTransformerEncoderLayer(nn.Module):
@@ -162,8 +172,8 @@ class DeformableTransformerEncoderLayer(nn.Module):
         self.linear2 = nn.Linear(d_ffn, d_model)
         self.dropout3 = nn.Dropout(dropout)
 
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
+        self.norm1 = AdaptiveLayerNorm(d_model, self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.ADAPT_LN, len(cfg.DATASETS.DATASET_ID_GROUP))
+        self.norm2 = AdaptiveLayerNorm(d_model, self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.ADAPT_LN, len(cfg.DATASETS.DATASET_ID_GROUP))
 
     @staticmethod
     def with_pos_embed(tensor, pos):
@@ -174,15 +184,15 @@ class DeformableTransformerEncoderLayer(nn.Module):
         src = src + self.dropout3(src2)
         return src
 
-    def forward(self, src, pos, reference_points, spatial_shapes, level_start_index, padding_mask=None):
+    def forward(self, src, pos, reference_points, spatial_shapes, level_start_index, padding_mask=None, dataset_group_pred = None):
         # self attention
         src2 = self.self_attn(self.with_pos_embed(src, pos), reference_points, src, spatial_shapes, level_start_index, padding_mask)
         src = src + self.dropout1(src2)
-        src = self.norm1(src)
+        src = self.norm1(src, dataset_group_pred)
 
         # ffn
         src = self.forward_ffn(src)
-        src = self.norm2(src)
+        src = self.norm2(src, dataset_group_pred)
 
         return src
 
@@ -209,7 +219,7 @@ class DeformableTransformerEncoder(nn.Module):
         reference_points = reference_points[:, :, None] * valid_ratios[:, None]
         return reference_points
 
-    def _forward(self, src, spatial_shapes, level_start_index, valid_ratios, pos=None, padding_mask=None,):
+    def _forward(self, src, spatial_shapes, level_start_index, valid_ratios, pos=None, padding_mask=None, dataset_group_pred = None):
         """
         Input:
             - src: [bs, sum(hi*wi), 256]
@@ -226,11 +236,11 @@ class DeformableTransformerEncoder(nn.Module):
         # import ipdb; ipdb.set_trace()
         reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=src.device)
         for _, layer in enumerate(self.layers):
-            output = layer(output, pos, reference_points, spatial_shapes, level_start_index, padding_mask)
+            output = layer(output, pos, reference_points, spatial_shapes, level_start_index, padding_mask, dataset_group_pred)
 
         return output
 
-    def forward(self, src, spatial_shapes, level_start_index, valid_ratios, pos=None, padding_mask=None,):
+    def forward(self, src, spatial_shapes, level_start_index, valid_ratios, pos=None, padding_mask=None, dataset_group_pred = None):
         if self.training:
             x = torch.utils.checkpoint.checkpoint(
                 self._forward, 
@@ -240,6 +250,7 @@ class DeformableTransformerEncoder(nn.Module):
                 valid_ratios, 
                 pos, 
                 padding_mask,
+                dataset_group_pred,
             )
         else:
             x = self._forward(
@@ -249,6 +260,7 @@ class DeformableTransformerEncoder(nn.Module):
                 valid_ratios, 
                 pos, 
                 padding_mask,
+                dataset_group_pred,
             )
         return x
 
@@ -263,12 +275,12 @@ class DeformableTransformerDecoderLayer(nn.Module):
         # cross attention
         self.cross_attn = MSDeformAttn(d_model, n_levels, n_heads, n_points)
         self.dropout1 = nn.Dropout(dropout)
-        self.norm1 = nn.LayerNorm(d_model)
+        self.norm1 = AdaptiveLayerNorm(d_model, self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.ADAPT_LN, len(cfg.DATASETS.DATASET_ID_GROUP))
 
         # self attention
         self.self_attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout)
         self.dropout2 = nn.Dropout(dropout)
-        self.norm2 = nn.LayerNorm(d_model)
+        self.norm2 = AdaptiveLayerNorm(d_model, self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.ADAPT_LN, len(cfg.DATASETS.DATASET_ID_GROUP))
 
         # ffn
         self.linear1 = nn.Linear(d_model, d_ffn)
@@ -276,7 +288,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
         self.dropout3 = nn.Dropout(dropout)
         self.linear2 = nn.Linear(d_ffn, d_model)
         self.dropout4 = nn.Dropout(dropout)
-        self.norm3 = nn.LayerNorm(d_model)
+        self.norm3 = AdaptiveLayerNorm(d_model, self.cfg.MODEL.DETECTOR3D.CENTER_PROPOSAL.ADAPT_LN, len(cfg.DATASETS.DATASET_ID_GROUP))
 
     @staticmethod
     def with_pos_embed(tensor, pos):
@@ -287,7 +299,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
         tgt = tgt + self.dropout4(tgt2)
         return tgt
 
-    def forward(self, tgt, query_pos, reference_points, src, src_spatial_shapes, level_start_index, src_padding_mask=None,):
+    def forward(self, tgt, query_pos, reference_points, src, src_spatial_shapes, level_start_index, src_padding_mask=None, dataset_group_pred=None):
         if self.training:
             x = torch.utils.checkpoint.checkpoint(
                 self._forward, 
@@ -298,6 +310,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
                 src_spatial_shapes, 
                 level_start_index, 
                 src_padding_mask,
+                dataset_group_pred,
             )
         else:
             x = self._forward(
@@ -308,26 +321,27 @@ class DeformableTransformerDecoderLayer(nn.Module):
                 src_spatial_shapes, 
                 level_start_index, 
                 src_padding_mask,
+                dataset_group_pred,
             )
         return x
 
-    def _forward(self, tgt, query_pos, reference_points, src, src_spatial_shapes, level_start_index, src_padding_mask=None,):
+    def _forward(self, tgt, query_pos, reference_points, src, src_spatial_shapes, level_start_index, src_padding_mask=None, dataset_group_pred=None):
         # self attention
         q = k = self.with_pos_embed(tgt, query_pos)
         tgt2 = self.self_attn(q.transpose(0, 1).contiguous(), k.transpose(0, 1).contiguous(), tgt.transpose(0, 1).contiguous())[0].transpose(0, 1).contiguous()
         tgt = tgt + self.dropout2(tgt2)
-        tgt = self.norm1(tgt)
+        tgt = self.norm1(tgt, dataset_group_pred)
 
         # cross attention
         tgt2 = self.cross_attn(self.with_pos_embed(tgt, query_pos),
                                reference_points,
                                src, src_spatial_shapes, level_start_index, src_padding_mask)
         tgt = tgt + self.dropout1(tgt2)
-        tgt = self.norm2(tgt)
+        tgt = self.norm2(tgt, dataset_group_pred)
 
         # ffn
         tgt = self.forward_ffn(tgt)
-        tgt = self.norm3(tgt)
+        tgt = self.norm3(tgt, dataset_group_pred)
 
         return tgt
 
@@ -340,6 +354,7 @@ class DeformableTransformerDecoder(nn.Module):
         self.num_layers = num_layers
         self.return_intermediate = return_intermediate
         # hack implementation for iterative bounding box refinement and two-stage Deformable DETR
+        self.use_dab = use_dab
         self.d_model = d_model
         self.no_sine_embed = no_sine_embed
 
@@ -349,8 +364,11 @@ class DeformableTransformerDecoder(nn.Module):
 
 
     def forward(self, tgt, reference_points, src, src_spatial_shapes, src_level_start_index, src_valid_ratios,
-                query_pos=None, src_padding_mask=None, reg_branches = None, reg_key_manager = None, ori_img_resolution = None,):
+                query_pos=None, src_padding_mask=None, reg_branches = None, reg_key_manager = None, 
+                ori_img_resolution = None, dataset_group_pred = None):
         output = tgt
+        if self.use_dab:
+            assert query_pos is None
         bs = src.shape[0]
         
         intermediate = []
@@ -364,7 +382,7 @@ class DeformableTransformerDecoder(nn.Module):
                 assert False
                 query_pos = query_pos + self.high_dim_query_proj(output)                 
 
-            output = layer(output, query_pos, reference_points_xz_input, src, src_spatial_shapes, src_level_start_index, src_padding_mask)
+            output = layer(output, query_pos, reference_points_xz_input, src, src_spatial_shapes, src_level_start_index, src_padding_mask, dataset_group_pred)
             
             if reg_branches is not None:
                 tmp = reg_branches[lid](output)[..., reg_key_manager('loc')]   # Left shape: (B, num_query, 3)
@@ -396,6 +414,35 @@ def _get_activation_fn(activation):
     if activation == "glu":
         return F.glu
     raise RuntimeError(F"activation should be relu/gelu, not {activation}.")
+
+class AdaptiveLayerNorm(nn.Module):
+    def __init__(self, d_model, adaptive_norm=False, group_num=-1):
+        super().__init__()
+        self.d_model = d_model
+        self.adaptive_norm = adaptive_norm
+        self.group_num = group_num
+
+        if not adaptive_norm:
+            self.layernorm = nn.LayerNorm(d_model)
+        else:
+            self.layernorm = nn.LayerNorm(d_model, elementwise_affine=False)
+            self.group_weight = nn.Embedding(group_num, d_model)
+            self.group_bias = nn.Embedding(group_num, d_model)
+            self.group_weight.weight.data.fill_(1.0)
+            self.group_bias.weight.data.fill_(0.0)
+    
+    def forward(self, x, dataset_group_pred=None):
+        if not self.adaptive_norm:
+            return self.layernorm(x)
+        else:
+            x = self.layernorm(x)   # Left shape: (B, L, C)
+            group_weight = self.group_weight.weight # Left shape: (group_num, C)
+            group_bias = self.group_bias.weight # Left shape: (group_num, C)
+            
+            weight = (dataset_group_pred.unsqueeze(-1) * group_weight[None]).sum(dim = 1, keepdim = True)    # Left shape: (B, 1, C)
+            bias = (dataset_group_pred.unsqueeze(-1) * group_bias[None]).sum(dim = 1, keepdim = True)   # Left shape: (B, 1, C)
+            x = weight * x + bias
+        return x
 
 class MLP(nn.Module):
     """ Very simple multi-layer perceptron (also called FFN)"""
