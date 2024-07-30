@@ -103,7 +103,7 @@ This project is released under [CC-BY-NC 4.0](LICENSE.md).
 
 ## Citing <a name="citing"></a>
 
-Please use the following BibTeX entry if you use Omni3D and/or Cube R-CNN in your research or refer to our results.
+Please use the following BibTeX entry if you use UniMODE, MM-UniMODE, or MM-Omni3D in your research or refer to our results.
 
 ```BibTeX
 @inproceedings{li2024unimode,
