@@ -2,9 +2,7 @@ _BASE_: "Base.yaml"
 
 DATASETS:
   TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'Objectron_train', 'Objectron_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
-  #TRAIN: ('SUNRGBD_val',)
   TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'Objectron_test', 'KITTI_test', 'nuScenes_test')
-  #TEST: ('SUNRGBD_test',)
   DATASET_ID_GROUP: [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17],]
   CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
   
@@ -12,7 +10,7 @@ INPUT:
   RESIZE_TGT_SIZE: (640, 512)
   RANDOM_FLIP: "none"
   COLOR_AUG: True
-  INPUT_MODALITY: 'camera'  # 'multi-modal', 'camera', 'point'
+  INPUT_MODALITY: 'camera'
 
 SOLVER:
   IMS_PER_BATCH: 192
@@ -21,7 +19,7 @@ SOLVER:
   WEIGHT_DECAY: 1e-2
   MAX_ITER: 116000
   VIRTUAL_EPOCHS: 20
-  VIRTUAL_LOSS: 5.0   # To avoid the total loss is too small.
+  VIRTUAL_LOSS: 5.0
 
   LR_SCHEDULER_NAME: "CosineAnnealing"
   WARMUP_FACTOR: 0.3333
@@ -35,7 +33,7 @@ SOLVER:
 
 TEST:
   EVAL_PERIOD: 29000
-  EVAL_MODE: 'ALL_PRED' # 'ALL_PRED', 'GT_LOC', 'GT_POSE', 'GT_DIM', 'GT_POSEDIM', 'DAP3D_LOC', 'DAP3D_POSE', 'DAP3D_DIM', 'DAP3D'
+  EVAL_MODE: 'ALL_PRED'
 
 MODEL:
   META_ARCHITECTURE: "MM_UniMODE"
