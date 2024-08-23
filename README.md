@@ -55,12 +55,19 @@ bash install_env.sh
 Please download all the data in [Data Link](https://huggingface.co/datasets/Zhuoling98/MM-Omni3D) and unzip them in $Root\datasets. The unzipped data folder should look like:
 
 datasets/
+
 ├── ARKitScenes/
+
 ├── KITTI_object/
+
 ├── MM-Omni3D/
+
 ├── SUNRGBD/
+
 ├── hypersim/
+
 ├── nuScenes/
+
 └── objection/
 
 ## Training <a name="training"></a>
