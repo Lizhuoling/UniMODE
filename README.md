@@ -45,14 +45,23 @@ This is the official implementation of the paper "UniMODE: Unified Monocular 3D 
 
 ## Installation <a name="installation"></a>
 
-We provide the scipt file install_env.sh to install all the dependencies. You can use the following command or run each command line in the script file step by step (recommended).
+We provide the script file install_env.sh to install all the dependencies. You can use the following command or run each command line in the script file step by step (recommended).
 
 ``` bash
 bash install_env.sh
 ```
 
 ## MM-Omni3D Data <a name="data"></a>
-This repo is built based on our developed composite dataset MM-Omni3D, which contains hundreds GBs of data. We are fighting to upload the whole dataset to HuggingFace. We will release the dataset download link soon. 
+Please download all the data in [Data Link](https://huggingface.co/datasets/Zhuoling98/MM-Omni3D) and unzip them in $Root\datasets. The unzipped data folder should look like:
+
+datasets/
+├── ARKitScenes/
+├── KITTI_object/
+├── MM-Omni3D/
+├── SUNRGBD/
+├── hypersim/
+├── nuScenes/
+└── objection/
 
 ## Training <a name="training"></a>
 
