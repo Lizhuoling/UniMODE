@@ -130,7 +130,7 @@ Please use the following BibTeX entry if you use UniMODE, MM-UniMODE, or MM-Omni
   year={2024}
 }
 
-@article{ba2016layer,
+@article{li2024towards,
   title={Towards Unified 3D Object Detection via Algorithm and Data Unification},
   author={Li, Zhuoling and Xu, Xiaogang and Lim, SerNam and Zhao, Hengshuang},
   journal={arXiv:2402.18573},
