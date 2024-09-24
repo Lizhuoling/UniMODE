@@ -6,7 +6,7 @@
 
 [Zhuoling Li][zl], [Xiaogang Xu][xx], [Ser-Nam Lim][sl], [Hengshuang Zhao][hz]
 
-[[`Project Page`]([xxx](https://lizhuoling.github.io/UniMODE_webpage/))] [[`UniMODE Paper`](https://openaccess.thecvf.com/content/CVPR2024/html/Li_UniMODE_Unified_Monocular_3D_Object_Detection_CVPR_2024_paper.html)] [[`MM-UniMODE Paper`](https://arxiv.org/pdf/2402.18573)]
+[[`Project Page`](https://lizhuoling.github.io/UniMODE_webpage/)] [[`UniMODE Paper`](https://openaccess.thecvf.com/content/CVPR2024/html/Li_UniMODE_Unified_Monocular_3D_Object_Detection_CVPR_2024_paper.html)] [[`MM-UniMODE Paper`](https://arxiv.org/pdf/2402.18573)]
 
 This is the official implementation of the paper "UniMODE: Unified Monocular 3D Object Detection" (published in CVPR2024) and "Towards Unified 3D Object Detection via Algorithm and Data Unification" (to be realeased soon).
 
