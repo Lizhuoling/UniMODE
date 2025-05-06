@@ -52,7 +52,7 @@ bash install_env.sh
 ```
 
 ## MM-Omni3D Data <a name="data"></a>
-Please download all the data in [Data Link](https://huggingface.co/datasets/Zhuoling98/MM-Omni3D) and unzip them in $Root\datasets. The unzipped data folder should look like:
+As the MM-Omni3D dataset is generated from the Omni3D dataset and is very large (hundreds of GB of data), we provide the code of generating data instead of data files. Refer to [Data Preparation](https://github.com/Lizhuoling/UniMODE/blob/master/data_preparation/Data_Preparation.md) for more details. The generated MM-Omni3D dataset folder should look like:
 
 datasets/
 
